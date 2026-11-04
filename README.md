@@ -36,6 +36,10 @@ Se non è impostata, BlueHub lascia scegliere al sistema.
 
 Su Wayland le modifiche all'estensione si vedono solo dopo logout/login.
 
+## Licenza
+
+GPL-2.0-or-later: vedi il file [LICENSE](LICENSE).
+
 ## Stato
 
 In preparazione per la pubblicazione su extensions.gnome.org.

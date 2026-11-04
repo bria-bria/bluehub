@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-or-later
+# SPDX-FileCopyrightText: 2026 bria-bria
 # ============================================================
 #  BlueHub — Centro di Controllo Connessioni Multiple Bluetooth
 #  - Gestione Multi-Antenna Intelligente (hci0, hci1, hci2...):

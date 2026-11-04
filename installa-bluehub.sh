@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-or-later
+# SPDX-FileCopyrightText: 2026 bria-bria
 # ============================================================
 #  installa-bluehub.sh
 #  1. Chiude eventuali finestre precedenti di BlueHub
@@ -42,7 +44,9 @@ EXT_DEST="$EXT_ROOT/$EXT_UUID"
 APP="$EXT_DEST/bluehub.py"                # il pannello gira dalla copia installata
 
 # --- 1. Chiude solo i processi Python di BlueHub (non l'editor) e aspetta che escano ---
-PATTERN="python3? .*bluehub\.py"
+# Solo comandi che INIZIANO con python3 e hanno come argomento .../bluehub.py
+# (non shell o terminali che contengono quelle parole nella loro riga di comando)
+PATTERN="^(/usr/bin/)?python3? [^ ]*bluehub\.py( |$)"
 if pgrep -f "$PATTERN" >/dev/null; then
     pkill -f "$PATTERN" || true
     for _ in {1..50}; do                       # max 5 secondi
