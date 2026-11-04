@@ -2,15 +2,16 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # SPDX-FileCopyrightText: 2026 bria-bria
 # ============================================================
-#  installa-bluehub.sh
-#  1. Chiude eventuali finestre precedenti di BlueHub
+#  installa-bluehub.sh  (installazione di sviluppo)
+#  1. Chiude l'eventuale vecchio pannello Python (versioni precedenti)
 #  2. Aggiorna l'estensione GNOME Shell "BlueHub" (UUID letto da metadata.json)
 #     e rimuove la vecchia versione con UUID bluehub@michele.local
 #  3. Aggiorna la scorciatoia nel menu Applicazioni
-#  4. Apre la finestra aggiornata di BlueHub
+#  4. Apre il pannello BlueHub (finestra Preferenze dell'estensione)
 #
-#  Nota: su Wayland (GNOME 45+) il codice nuovo dell'estensione viene
-#  caricato solo dopo logout/login. Lo script lo segnala quando serve.
+#  Nota: su Wayland (GNOME 45+) il codice nuovo del pulsante nel menu rapido
+#  (extension.js, bluehub-core.js) viene caricato solo dopo logout/login.
+#  Il pannello (prefs.js) invece si aggiorna subito. Lo script lo segnala.
 # ============================================================
 set -euo pipefail
 
@@ -25,10 +26,10 @@ PROJ_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 EXT_SRC="$PROJ_DIR/bluehub-extension"
 EXT_ROOT="$HOME/.local/share/gnome-shell/extensions"
 OLD_UUID="bluehub@michele.local"          # vecchia versione, da togliere
-APP_ID="io.github.bria_bria.BlueHub"      # deve coincidere con application_id in bluehub.py
 DESKTOP_DIR="$HOME/.local/share/applications"
-LOG_FILE="$HOME/.cache/bluehub.log"
-EXT_FILES=(metadata.json extension.js prefs.js bluehub.py)
+EXT_FILES=(metadata.json extension.js prefs.js bluehub-core.js)
+# File che il menu rapido carica solo al login (prefs.js invece si ricarica da solo)
+SHELL_FILES=(metadata.json extension.js bluehub-core.js)
 
 # --- Controllo che ci siano tutti i file PRIMA di toccare qualcosa ---
 for f in "${EXT_FILES[@]/#/$EXT_SRC/}"; do
@@ -39,36 +40,31 @@ for f in "${EXT_FILES[@]/#/$EXT_SRC/}"; do
 done
 
 # UUID: unica fonte è metadata.json
-EXT_UUID="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["uuid"])' "$EXT_SRC/metadata.json")"
-EXT_DEST="$EXT_ROOT/$EXT_UUID"
-APP="$EXT_DEST/bluehub.py"                # il pannello gira dalla copia installata
-
-# --- 1. Chiude solo i processi Python di BlueHub (non l'editor) e aspetta che escano ---
-# Solo comandi che INIZIANO con python3 e hanno come argomento .../bluehub.py
-# (non shell o terminali che contengono quelle parole nella loro riga di comando)
-PATTERN="^(/usr/bin/)?python3? [^ ]*bluehub\.py( |$)"
-if pgrep -f "$PATTERN" >/dev/null; then
-    pkill -f "$PATTERN" || true
-    for _ in {1..50}; do                       # max 5 secondi
-        pgrep -f "$PATTERN" >/dev/null || break
-        sleep 0.1
-    done
-    if pgrep -f "$PATTERN" >/dev/null; then    # ancora vivo: chiusura forzata
-        pkill -9 -f "$PATTERN" || true
-        sleep 0.3
-    fi
+EXT_UUID="$(sed -n 's/.*"uuid"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$EXT_SRC/metadata.json")"
+if [[ -z "$EXT_UUID" ]]; then
+    echo "ERRORE: UUID non trovato in metadata.json" >&2
+    exit 1
 fi
+EXT_DEST="$EXT_ROOT/$EXT_UUID"
+
+# --- 1. Chiude il vecchio pannello Python, se ancora aperto (versioni precedenti) ---
+# Solo comandi che INIZIANO con python3 e hanno come argomento .../bluehub.py
+PATTERN="^(/usr/bin/)?python3? [^ ]*bluehub\.py( |$)"
+pkill -f "$PATTERN" 2>/dev/null || true
 
 # --- 2. Aggiorna l'estensione (unica fonte: cartella bluehub-extension/) ---
 mkdir -p "$EXT_DEST"
 EXT_CHANGED=0
 for f in "${EXT_FILES[@]}"; do
     if ! cmp -s "$EXT_SRC/$f" "$EXT_DEST/$f"; then
-        # Solo i file dell'estensione richiedono logout; bluehub.py no
-        [[ $f != bluehub.py ]] && EXT_CHANGED=1
+        for s in "${SHELL_FILES[@]}"; do
+            [[ $f == "$s" ]] && EXT_CHANGED=1
+        done
         cp -f "$EXT_SRC/$f" "$EXT_DEST/$f"
     fi
 done
+# Il vecchio pannello Python non fa più parte dell'estensione
+rm -f -- "$EXT_DEST/bluehub.py"
 
 # Toglie la vecchia versione (altrimenti al login comparirebbero due pulsanti BlueHub)
 if [[ "$OLD_UUID" != "$EXT_UUID" && -d "$EXT_ROOT/$OLD_UUID" ]]; then
@@ -80,7 +76,9 @@ fi
 
 # Attiva la nuova. Se GNOME non la conosce ancora (estensione appena installata,
 # su Wayland serve il login), la aggiunge alla lista così parte al prossimo login.
+EXT_KNOWN=1
 if ! gnome-extensions enable "$EXT_UUID" 2>/dev/null; then
+    EXT_KNOWN=0
     CURRENT="$(gsettings get org.gnome.shell enabled-extensions)"
     if [[ "$CURRENT" != *"'$EXT_UUID'"* ]]; then
         if [[ "$CURRENT" == "@as []" || "$CURRENT" == "[]" ]]; then
@@ -93,36 +91,29 @@ if ! gnome-extensions enable "$EXT_UUID" 2>/dev/null; then
     EXT_CHANGED=1
 fi
 
-# --- 3. Scorciatoia nel menu Applicazioni ---
+# --- 3. Scorciatoia nel menu Applicazioni: apre il pannello (Preferenze) ---
 mkdir -p "$DESKTOP_DIR"
 cat > "$DESKTOP_DIR/bluehub.desktop" <<EOF
 [Desktop Entry]
 Name=BlueHub
 Comment=Connessioni Bluetooth Multiple (Gamepad e Audio Condiviso)
-Exec=/usr/bin/python3 "$APP"
+Exec=gnome-extensions prefs $EXT_UUID
 Icon=bluetooth-active
 Terminal=false
 Type=Application
 Categories=AudioVideo;Audio;Settings;Game;
-StartupWMClass=$APP_ID
 EOF
 
-# --- 4. Apre BlueHub, con log degli errori ---
-mkdir -p "$(dirname "$LOG_FILE")"
-nohup /usr/bin/python3 "$APP" >"$LOG_FILE" 2>&1 &
-APP_PID=$!
-sleep 2
-if ! kill -0 "$APP_PID" 2>/dev/null; then
-    echo "ERRORE: BlueHub si è chiuso subito. Ultime righe del log ($LOG_FILE):" >&2
-    tail -n 20 "$LOG_FILE" >&2
-    exit 1
+# --- 4. Apre il pannello ---
+if [[ $EXT_KNOWN -eq 1 ]]; then
+    gnome-extensions prefs "$EXT_UUID" || echo "ATTENZIONE: impossibile aprire il pannello BlueHub." >&2
 fi
 
 echo "============================================================"
-echo " BlueHub aggiornato e aperto."
+echo " BlueHub aggiornato."
 if [[ $EXT_CHANGED -eq 1 ]]; then
     echo ""
-    echo " ⚠  L'estensione del pannello è cambiata: per vederla aggiornata"
+    echo " ⚠  Il pulsante nel menu rapido è cambiato: per vederlo aggiornato"
     echo "    fai LOGOUT e poi LOGIN (su Wayland è obbligatorio)."
 fi
 echo "============================================================"

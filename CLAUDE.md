@@ -3,8 +3,11 @@
 Rispondere sempre in italiano. Guidare Michele un passo alla volta.
 
 ## Cos'è
-Estensione GNOME Shell + pannello Python (GTK4/libadwaita) per gestire più
-dispositivi Bluetooth insieme (gamepad, cuffie) e l'audio condiviso.
+Estensione GNOME Shell, tutta in GJS, per gestire più dispositivi Bluetooth
+insieme (gamepad, cuffie) e l'audio condiviso. Il pannello è la finestra
+Preferenze (`prefs.js`); la logica comune sta in `bluehub-core.js`.
+Il vecchio pannello Python `bluehub.py` è stato eliminato il 04/11/2026
+(regola di extensions.gnome.org: gli script devono essere in GJS).
 Repository git in questa cartella, collegato a GitHub **privato**
 `bria-bria/bluehub` (deciso da Michele il 04/11/2026: resta privato anche
 dopo la pubblicazione su extensions.gnome.org).
@@ -12,8 +15,12 @@ dopo la pubblicazione su extensions.gnome.org).
 ## Origine
 Copiato il 04/11/2026 da `Projects/Mio Portatile Linux/` (la copia là è vecchia,
 non più usata). Dal 04/11/2026 l'installazione si fa da qui con
-`./installa-bluehub.sh`: il pannello gira dalla copia installata in
-`~/.local/share/gnome-shell/extensions/<uuid>/bluehub.py`.
+`./installa-bluehub.sh`, che copia i file in
+`~/.local/share/gnome-shell/extensions/<uuid>/` e apre il pannello con
+`gnome-extensions prefs <uuid>`.
+
+**Alla fine di ogni modifica importante fare sempre la revisione con la skill
+code-review** (richiesta di Michele, 04/11/2026).
 
 ## Obiettivo: pubblicare su extensions.gnome.org
 Cose da sistemare prima (vedi `00_INDICE.md`):

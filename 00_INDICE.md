@@ -2,9 +2,9 @@
 
 | File | Cosa contiene |
 |---|---|
-| `bluehub-extension/bluehub.py` | Pannello di controllo GTK4 (canali BT, microfoni, audio condiviso) |
 | `bluehub-extension/extension.js` | Pulsante nel menu rapido di GNOME |
-| `bluehub-extension/prefs.js` | Finestra preferenze (apre il pannello) |
+| `bluehub-extension/prefs.js` | Pannello di controllo (finestra Preferenze): canali, Cerca BT, microfoni, audio condiviso |
+| `bluehub-extension/bluehub-core.js` | Logica comune: Bluetooth (D-Bus), audio (pactl), configurazione |
 | `bluehub-extension/metadata.json` | Nome, UUID, versioni GNOME supportate |
 | `installa-bluehub.sh` | Installa/aggiorna l'estensione e apre il pannello |
 | `README.md` | Descrizione pubblica del progetto |
@@ -18,6 +18,8 @@
 - [x] Tolte impostazioni specifiche dell'XPS 17: ora "fallback_sink" in ~/.config/bluehub.json (04/11/2026)
 - [x] Nuovo UUID `bluehub@bria-bria.github.io` e app id `io.github.bria_bria.BlueHub` (04/11/2026)
 - [x] Licenza GPL-2.0-or-later: file `LICENSE` + intestazioni SPDX (04/11/2026; senza campo `url`: repository privato)
+- [x] Revisione code-review + correzione di 5 errori (04/11/2026)
+- [x] Pannello riscritto in GJS dentro `prefs.js` + `bluehub-core.js`; `bluehub.py` eliminato (04/11/2026)
 - [ ] Pacchetto zip per extensions.gnome.org (con `LICENSE` dentro)
 - [x] Su GitHub, privato: `bria-bria/bluehub` (04/11/2026)
 - [ ] Caricamento su extensions.gnome.org (lo fa Michele)
