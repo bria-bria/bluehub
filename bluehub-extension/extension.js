@@ -95,7 +95,12 @@ async function applyFallbackSink(allSinkNames, cancellable) {
     }
 }
 
-async function applySharedAudioState(enabled, cancellable) {
+// Gestisce l'audio condiviso. prevBtSinks = cuffie viste all'aggiornamento precedente
+// (null = non ancora note): l'uscita predefinita si cambia SOLO quando le cuffie
+// cambiano, così non si sovrascrive l'uscita scelta a mano dall'utente.
+// Stessa logica di sync_automatic_shared_audio in bluehub.py.
+// Restituisce {count, btSinks}.
+async function applySharedAudioState(enabled, prevBtSinks, cancellable) {
     const [modulesOut, sinksOut] = await Promise.all([
         runCommand(['pactl', 'list', 'short', 'modules'], cancellable),
         runCommand(['pactl', '-f', 'json', 'list', 'sinks'], cancellable),
@@ -105,7 +110,7 @@ async function applySharedAudioState(enabled, cancellable) {
     try {
         allSinkNames = JSON.parse(sinksOut || '[]').map(s => s.name || '');
     } catch (_e) {
-        return 0;
+        return {count: 0, btSinks: prevBtSinks};
     }
     // Ordinate, così la stessa coppia di cuffie dà sempre la stessa riga "slaves="
     const btSinks = allSinkNames.filter(n => n.startsWith('bluez_output.')).sort();
@@ -117,6 +122,7 @@ async function applySharedAudioState(enabled, cancellable) {
     // se uno ha già esattamente queste cuffie lo tiene, gli altri li rimuove.
     // Così aprire il menu non interrompe l'audio se non è cambiato nulla.
     let keepExisting = false;
+    let removed = 0;
     for (const line of modulesOut.split('\n')) {
         if (!line.includes('module-combine-sink') ||
             !(line.includes(COMBINED_SINK_NAME) || line.includes('multy_bt_sink') || line.includes('audio_condiviso_scelto'))) {
@@ -131,12 +137,16 @@ async function applySharedAudioState(enabled, cancellable) {
         }
         if (id) {
             await runCommand(['pactl', 'unload-module', id], cancellable);
+            removed++;
         }
     }
 
     if (!enabled) {
-        await applyFallbackSink(allSinkNames, cancellable);
-        return 0;
+        // Riporta l'audio sull'uscita di riserva solo se BlueHub stava usando l'audio condiviso
+        if (removed > 0) {
+            await applyFallbackSink(allSinkNames, cancellable);
+        }
+        return {count: 0, btSinks: null};
     }
 
     if (wantCombined) {
@@ -149,14 +159,18 @@ async function applySharedAudioState(enabled, cancellable) {
                 wantedSlaves,
                 'sink_properties=device.description="BlueHub_Audio_Condiviso_Automatico"',
             ], cancellable);
+            await runCommand(['pactl', 'set-default-sink', COMBINED_SINK_NAME], cancellable);
         }
-        await runCommand(['pactl', 'set-default-sink', COMBINED_SINK_NAME], cancellable);
     } else if (btSinks.length === 1) {
-        await runCommand(['pactl', 'set-default-sink', btSinks[0]], cancellable);
-    } else {
+        // Passa alla cuffia solo se è appena arrivata o se finiva l'audio condiviso
+        if (removed > 0 || (prevBtSinks !== null && !prevBtSinks.includes(btSinks[0]))) {
+            await runCommand(['pactl', 'set-default-sink', btSinks[0]], cancellable);
+        }
+    } else if (removed > 0 || prevBtSinks?.length > 0) {
+        // Nessuna cuffia: torna all'uscita di riserva solo se le cuffie si sono appena scollegate
         await applyFallbackSink(allSinkNames, cancellable);
     }
-    return btSinks.length;
+    return {count: btSinks.length, btSinks};
 }
 
 const BlueHubQuickToggle = GObject.registerClass(
@@ -177,6 +191,7 @@ class BlueHubQuickToggle extends QuickMenuToggle {
         this._cancellable = new Gio.Cancellable();
         this._refreshing = false;
         this._refreshAgain = false;
+        this._lastBtSinks = null;   // cuffie BT viste all'ultimo aggiornamento
         this.connect('destroy', () => this._cancellable.cancel());
 
         this.menu.setHeader('bluetooth-active-symbolic', 'BlueHub', 'Gestione Canali Bluetooth & Audio Condiviso');
@@ -233,12 +248,14 @@ class BlueHubQuickToggle extends QuickMenuToggle {
                 }
 
                 const hw = getHardwareChannelStats();
-                const btAudioCount = await applySharedAudioState(isEnabled, this._cancellable);
+                const audio = await applySharedAudioState(isEnabled, this._lastBtSinks, this._cancellable);
 
                 // Estensione disattivata mentre i comandi giravano: non toccare più il pulsante
                 if (this._cancellable.is_cancelled()) {
                     return;
                 }
+                this._lastBtSinks = audio.btSinks;
+                const btAudioCount = audio.count;
 
                 if (!isEnabled) {
                     this.subtitle = 'Disattivato';

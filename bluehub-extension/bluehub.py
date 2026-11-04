@@ -29,6 +29,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 import gi
 
 gi.require_version('Gtk', '4.0')
@@ -50,12 +51,27 @@ def load_config():
 
 
 def save_config(cfg):
+    # Scrive su un file temporaneo e poi lo sostituisce: l'estensione non legge mai un file a metà
     try:
         os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
-        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+        tmp = CONFIG_FILE + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(cfg, f, indent=2)
+        os.replace(tmp, CONFIG_FILE)
     except Exception:
         pass
+
+
+def update_config(**changes):
+    """
+    Rilegge la configurazione dal disco, cambia solo le chiavi indicate e la salva.
+    Così non si cancellano le modifiche fatte nel frattempo dall'estensione
+    (es. BlueHub spento dal menu rapido mentre il pannello è aperto).
+    """
+    cfg = load_config()
+    cfg.update(changes)
+    save_config(cfg)
+    return cfg
 
 
 def run_cmd(args, input_text=None, timeout=8):
@@ -98,6 +114,43 @@ def _get_bluez_managed_objects():
         return unpacked[0] if unpacked else {}
     except Exception:
         return {}
+
+
+def scan_with_adapter(hci, seconds=8):
+    """
+    Accende l'antenna indicata (hci0, hci1...), la rende accoppiabile e cerca
+    nuovi dispositivi per `seconds` secondi via D-Bus. Restituisce False se
+    BlueZ non risponde (allora si usa bluetoothctl come riserva).
+    """
+    path = f'/org/bluez/{hci}'
+    try:
+        bus = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
+
+        def set_prop(name, value):
+            bus.call_sync(
+                'org.bluez', path, 'org.freedesktop.DBus.Properties', 'Set',
+                GLib.Variant('(ssv)', ('org.bluez.Adapter1', name, GLib.Variant('b', value))),
+                None, Gio.DBusCallFlags.NONE, 5000, None,
+            )
+
+        def call(method):
+            bus.call_sync(
+                'org.bluez', path, 'org.bluez.Adapter1', method,
+                None, None, Gio.DBusCallFlags.NONE, 5000, None,
+            )
+
+        set_prop('Powered', True)
+        set_prop('Pairable', True)
+        call('StartDiscovery')
+    except Exception:
+        return False
+
+    time.sleep(seconds)
+    try:
+        call('StopDiscovery')
+    except Exception:
+        pass
+    return True
 
 
 def _detect_bus_type(hci_name):
@@ -422,15 +475,30 @@ def get_bt_audio_sources():
         return []
 
 
-def unload_combined():
+def unload_combined(keep_slaves=None):
+    """
+    Rimuove i combine-sink di BlueHub (anche quelli con i vecchi nomi).
+    Se keep_slaves (es. 'slaves=a,b') è indicato, tiene quello che ha già
+    esattamente quelle cuffie, così l'audio non si interrompe.
+    Restituisce (quanti_rimossi, tenuto_quello_giusto).
+    Stessa logica di applySharedAudioState in extension.js.
+    """
+    removed, kept = 0, False
     out = run_cmd(['pactl', 'list', 'short', 'modules'])
     for line in out.splitlines():
-        if 'module-combine-sink' in line and (
+        if 'module-combine-sink' not in line or not (
             COMBINED_SINK_NAME in line or 'multy_bt_sink' in line or 'audio_condiviso_scelto' in line
         ):
-            parts = line.strip().split()
-            if parts:
-                run_cmd(['pactl', 'unload-module', parts[0]])
+            continue
+        parts = line.strip().split('\t')
+        args = parts[2].split() if len(parts) > 2 else []
+        if keep_slaves and not kept and f'sink_name={COMBINED_SINK_NAME}' in args and keep_slaves in args:
+            kept = True
+            continue
+        if parts and parts[0]:
+            run_cmd(['pactl', 'unload-module', parts[0]])
+            removed += 1
+    return removed, kept
 
 
 def unload_combined_mics():
@@ -515,36 +583,57 @@ def apply_fallback_sink():
     return None
 
 
+# Cuffie BT viste all'ultimo aggiornamento (None = non ancora note).
+# Serve a cambiare l'uscita audio SOLO quando le cuffie cambiano,
+# senza sovrascrivere l'uscita che l'utente ha scelto a mano.
+_last_bt_sinks = None
+
+
 def sync_automatic_shared_audio(enabled=True, mic_enabled_macs=None):
-    unload_combined()
+    global _last_bt_sinks
 
     if not enabled:
+        removed, _ = unload_combined()
         unload_combined_mics()
-        apply_fallback_sink()
+        _last_bt_sinks = None
+        # Riporta l'audio sull'uscita di riserva solo se BlueHub stava usando l'audio condiviso
+        if removed:
+            apply_fallback_sink()
         return "⚪ BlueHub Disattivato — Condivisione audio spenta"
 
     mic_msg = sync_bt_microphones(enabled=True, mic_enabled_macs=mic_enabled_macs)
-    bt_sinks = get_bt_audio_sinks()
+    # Ordinate per nome: stessa riga "slaves=" dell'estensione (vedi extension.js)
+    bt_sinks = sorted(get_bt_audio_sinks(), key=lambda s: s['name'])
+    names_now = [s['name'] for s in bt_sinks]
+    prev = _last_bt_sinks
+    _last_bt_sinks = names_now
 
     if len(bt_sinks) >= 2:
-        slaves_str = ','.join(s['name'] for s in bt_sinks)
-        run_cmd([
-            'pactl', 'load-module', 'module-combine-sink',
-            f'sink_name={COMBINED_SINK_NAME}',
-            f'slaves={slaves_str}',
-            'sink_properties=device.description="BlueHub_Audio_Condiviso_Automatico"',
-        ])
-        run_cmd(['pactl', 'set-default-sink', COMBINED_SINK_NAME])
+        slaves = 'slaves=' + ','.join(names_now)
+        _removed, kept = unload_combined(keep_slaves=slaves)
+        if not kept:
+            run_cmd([
+                'pactl', 'load-module', 'module-combine-sink',
+                f'sink_name={COMBINED_SINK_NAME}',
+                slaves,
+                'sink_properties=device.description="BlueHub_Audio_Condiviso_Automatico"',
+            ])
+            run_cmd(['pactl', 'set-default-sink', COMBINED_SINK_NAME])
         names = ', '.join(s['desc'] for s in bt_sinks)
         return f"🎶 Ascolto Condiviso AUTOMATICO su {len(bt_sinks)} cuffie ({names}){mic_msg}"
-    elif len(bt_sinks) == 1:
-        run_cmd(['pactl', 'set-default-sink', bt_sinks[0]['name']])
+
+    removed, _ = unload_combined()
+    if len(bt_sinks) == 1:
+        # Passa alla cuffia solo se è appena arrivata o se finiva l'audio condiviso
+        if removed or (prev is not None and names_now[0] not in prev):
+            run_cmd(['pactl', 'set-default-sink', names_now[0]])
         return f"🎧 Audio su: {bt_sinks[0]['desc']}{mic_msg}"
-    else:
-        fallback_desc = apply_fallback_sink()
-        if fallback_desc:
-            return f"🔊 Nessuna cuffia BT connessa — Audio attivo su: {fallback_desc}"
-        return "🔊 Nessuna cuffia BT connessa — Audio sull'uscita predefinita del sistema"
+
+    # Nessuna cuffia: torna all'uscita di riserva solo se le cuffie si sono appena scollegate
+    fallback_desc = apply_fallback_sink() if (removed or prev) else None
+    if fallback_desc:
+        return f"🔊 Nessuna cuffia BT connessa — Audio attivo su: {fallback_desc}"
+    return "🔊 Nessuna cuffia BT connessa — Audio sull'uscita scelta nel sistema"
 
 
 class BlueHubWindow(Adw.ApplicationWindow):
@@ -615,7 +704,7 @@ class BlueHubWindow(Adw.ApplicationWindow):
         self.master_toggle_btn = Gtk.ToggleButton()
         self.master_toggle_btn.set_valign(Gtk.Align.CENTER)
         self.master_toggle_btn.set_active(self.ext_enabled)
-        self.master_toggle_btn.connect('toggled', self.on_master_toggle)
+        self._master_toggle_handler = self.master_toggle_btn.connect('toggled', self.on_master_toggle)
         ext_btns_box.append(self.master_toggle_btn)
 
         self.ext_row.add_suffix(ext_btns_box)
@@ -800,8 +889,7 @@ class BlueHubWindow(Adw.ApplicationWindow):
         if not btn.get_active():
             return
         self.preferred_scan_hci = key
-        self.cfg['preferred_scan_hci'] = key
-        save_config(self.cfg)
+        self.cfg = update_config(preferred_scan_hci=key)
         self.show_toast(
             f"Antenna per nuovi accoppiamenti: {'Automatica (la più scarica)' if key == 'auto' else key}"
         )
@@ -822,11 +910,10 @@ class BlueHubWindow(Adw.ApplicationWindow):
 
     def on_master_toggle(self, btn):
         self.ext_enabled = btn.get_active()
-        self.cfg['enabled'] = self.ext_enabled
-        save_config(self.cfg)
-        self._update_master_toggle_style()
-        self._rebuild_device_lists()
+        self.cfg = update_config(enabled=self.ext_enabled)
         self.show_toast("BlueHub Attivo" if self.ext_enabled else "BlueHub Disattivato")
+        # Applica subito l'audio (accende/spegne l'audio condiviso) e ridisegna tutto
+        self.refresh_all()
 
     def _clamp_quotas(self):
         self.quota_gamepads = max(self.conn_gamepads, min(self.usable_pool, self.quota_gamepads))
@@ -910,7 +997,10 @@ class BlueHubWindow(Adw.ApplicationWindow):
         self.preferred_scan_hci = self.cfg.get('preferred_scan_hci', 'auto')
         self.mic_enabled_macs = set(m.upper() for m in self.cfg.get('mic_enabled_macs', []))
         if self.master_toggle_btn.get_active() != self.ext_enabled:
+            # Allinea il pulsante alla configurazione senza far scattare on_master_toggle
+            self.master_toggle_btn.handler_block(self._master_toggle_handler)
             self.master_toggle_btn.set_active(self.ext_enabled)
+            self.master_toggle_btn.handler_unblock(self._master_toggle_handler)
 
         # Sincronizza subito profili microfono e audio condiviso prima di rileggere lo stato delle schede
         shared_status_msg = sync_automatic_shared_audio(self.ext_enabled, self.mic_enabled_macs)
@@ -1115,8 +1205,7 @@ class BlueHubWindow(Adw.ApplicationWindow):
         else:
             self.mic_enabled_macs.discard(mac)
 
-        self.cfg['mic_enabled_macs'] = sorted(list(self.mic_enabled_macs))
-        save_config(self.cfg)
+        self.cfg = update_config(mic_enabled_macs=sorted(self.mic_enabled_macs))
 
         mode_txt = "Microfono BT attivato" if want_mic else "Audio Stereo HD ripristinato (Mic spento)"
         self.show_toast(f"{dev['name']}: {mode_txt}")
@@ -1212,21 +1301,12 @@ class BlueHubWindow(Adw.ApplicationWindow):
             self.show_toast("Scansione Bluetooth attiva per 8 secondi...")
 
         def worker():
-            target_mac = target_info.get('mac', '')
-            if target_mac:
-                run_btctl_commands([
-                    f"select {target_mac}",
-                    "power on",
-                    "pairable on",
-                    "scan on",
-                ], timeout=2)
-                subprocess.run(['sleep', '8'], check=False)
-                run_btctl_commands([
-                    f"select {target_mac}",
-                    "scan off",
-                ], timeout=3)
-            else:
-                run_cmd(['bluetoothctl', '--timeout', '8', 'scan', 'on'], timeout=10)
+            # La ricerca di BlueZ resta attiva solo finché è vivo chi l'ha avviata:
+            # la avviamo via D-Bus da questo processo e la fermiamo dopo 8 secondi.
+            # (Prima si usava bluetoothctl con "scan on" + "quit": la ricerca si
+            # fermava subito, appena bluetoothctl usciva.)
+            if not scan_with_adapter(target_hci, seconds=8):
+                run_cmd(['bluetoothctl', '--timeout', '8', 'scan', 'on'], timeout=12)
 
             def done():
                 btn.set_sensitive(True)
