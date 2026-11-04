@@ -19,28 +19,20 @@ fi
 
 # --- Percorsi (ricavati, non scritti a mano) ---
 PROJ_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
-APP="$PROJ_DIR/bluehub.py"
 EXT_UUID="bluehub@michele.local"
 EXT_SRC="$PROJ_DIR/bluehub-extension"
 EXT_DEST="$HOME/.local/share/gnome-shell/extensions/$EXT_UUID"
+APP="$EXT_DEST/bluehub.py"                # il pannello gira dalla copia installata
 DESKTOP_DIR="$HOME/.local/share/applications"
 APP_ID="local.michele.BlueHub"
 LOG_FILE="$HOME/.cache/bluehub.log"
-EXT_FILES=(metadata.json extension.js prefs.js)
+EXT_FILES=(metadata.json extension.js prefs.js bluehub.py)
 
 # --- Controllo che ci siano tutti i file PRIMA di toccare qualcosa ---
-for f in "$APP" "${EXT_FILES[@]/#/$EXT_SRC/}"; do
+for f in "${EXT_FILES[@]/#/$EXT_SRC/}"; do
     if [[ ! -f "$f" ]]; then
         echo "ERRORE: file mancante: $f" >&2
         exit 1
-    fi
-done
-
-# extension.js e prefs.js contengono il percorso di bluehub.py:
-# avviso se non corrisponde alla cartella attuale del progetto.
-for f in extension.js prefs.js; do
-    if ! grep -qF "$APP" "$EXT_SRC/$f"; then
-        echo "ATTENZIONE: $f non punta a $APP (cartella rinominata?). Controlla BLUEHUB_APP_PATH." >&2
     fi
 done
 
@@ -63,7 +55,8 @@ mkdir -p "$EXT_DEST"
 EXT_CHANGED=0
 for f in "${EXT_FILES[@]}"; do
     if ! cmp -s "$EXT_SRC/$f" "$EXT_DEST/$f"; then
-        EXT_CHANGED=1
+        # Solo i file dell'estensione richiedono logout; bluehub.py no
+        [[ $f != bluehub.py ]] && EXT_CHANGED=1
         cp -f "$EXT_SRC/$f" "$EXT_DEST/$f"
     fi
 done

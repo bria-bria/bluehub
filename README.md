@@ -7,7 +7,7 @@ Gestione di più connessioni Bluetooth contemporanee su GNOME:
 
 - **Estensione GNOME Shell** (`bluehub-extension/`): un pulsante nel menu rapido
   per attivare/disattivare BlueHub e vedere i canali Bluetooth in uso.
-- **Pannello di controllo** (`bluehub.py`): finestra GTK4/libadwaita per
+- **Pannello di controllo** (`bluehub-extension/bluehub.py`): finestra GTK4/libadwaita per
   distribuire i canali tra gamepad e cuffie, gestire i microfoni e l'audio condiviso.
 
 ## Requisiti

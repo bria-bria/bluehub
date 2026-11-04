@@ -2,7 +2,7 @@
 
 | File | Cosa contiene |
 |---|---|
-| `bluehub.py` | Pannello di controllo GTK4 (canali BT, microfoni, audio condiviso) |
+| `bluehub-extension/bluehub.py` | Pannello di controllo GTK4 (canali BT, microfoni, audio condiviso) |
 | `bluehub-extension/extension.js` | Pulsante nel menu rapido di GNOME |
 | `bluehub-extension/prefs.js` | Finestra preferenze (apre il pannello) |
 | `bluehub-extension/metadata.json` | Nome, UUID, versioni GNOME supportate |
@@ -12,7 +12,7 @@
 
 ## Strada verso extensions.gnome.org
 - [x] Cartella dedicata + git locale (04/11/2026)
-- [ ] `bluehub.py` dentro l'estensione, percorso relativo
+- [x] `bluehub.py` dentro l'estensione, percorso relativo (04/11/2026, ramo `ego/percorso-relativo`)
 - [ ] Comandi `pactl` asincroni
 - [ ] Togliere impostazioni specifiche dell'XPS 17
 - [ ] Nuovo UUID

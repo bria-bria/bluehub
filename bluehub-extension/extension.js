@@ -9,8 +9,18 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import {QuickMenuToggle, SystemIndicator} from 'resource:///org/gnome/shell/ui/quickSettings.js';
 
 const COMBINED_SINK_NAME = 'bluehub_combined_sink';
-const BLUEHUB_APP_PATH = '/home/michele/Documenti/Claude/Projects/Mio Portatile Linux/bluehub.py';
+const APP_SCRIPT = 'bluehub.py';
 const CONFIG_FILE = GLib.build_filenamev([GLib.get_home_dir(), '.config', 'bluehub.json']);
+
+// Apre il pannello BlueHub (bluehub.py si trova dentro la cartella dell'estensione)
+function launchApp(extensionPath) {
+    const appPath = GLib.build_filenamev([extensionPath, APP_SCRIPT]);
+    try {
+        Gio.Subprocess.new(['python3', appPath], Gio.SubprocessFlags.NONE);
+    } catch (e) {
+        console.error(`[BlueHub] Impossibile aprire ${appPath}: ${e}`);
+    }
+}
 
 function runCommand(argv) {
     try {
@@ -120,7 +130,7 @@ function applySharedAudioState(enabled) {
 
 const BlueHubQuickToggle = GObject.registerClass(
 class BlueHubQuickToggle extends QuickMenuToggle {
-    _init() {
+    _init(extensionPath) {
         const cfg = loadConfig();
         const isEnabled = cfg.enabled !== false;
 
@@ -142,7 +152,7 @@ class BlueHubQuickToggle extends QuickMenuToggle {
         const openAppItem = new PopupMenu.PopupMenuItem('🚀 Apri Pannello Canali BlueHub (+ / −)');
         openAppItem.connect('activate', () => {
             Main.panel.statusArea.quickSettings.menu.close();
-            GLib.spawn_command_line_async(`/usr/bin/python3 "${BLUEHUB_APP_PATH}"`);
+            launchApp(extensionPath);
         });
         this.menu.addMenuItem(openAppItem);
 
@@ -188,19 +198,19 @@ class BlueHubQuickToggle extends QuickMenuToggle {
 
 const BlueHubSystemIndicator = GObject.registerClass(
 class BlueHubSystemIndicator extends SystemIndicator {
-    _init() {
+    _init(extensionPath) {
         super._init();
 
         // Nessuna seconda icona nella barra in alto (Opzione 3):
         // solo il pulsante grande nel menu rapido di GNOME!
-        this._toggle = new BlueHubQuickToggle();
+        this._toggle = new BlueHubQuickToggle(extensionPath);
         this.quickSettingsItems.push(this._toggle);
     }
 });
 
 export default class BlueHubExtension extends Extension {
     enable() {
-        this._indicator = new BlueHubSystemIndicator();
+        this._indicator = new BlueHubSystemIndicator(this.path);
         this._gridSignals = [];
         this._childVisSignals = new Map();
 

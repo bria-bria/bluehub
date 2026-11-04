@@ -1,9 +1,8 @@
 import Adw from 'gi://Adw';
 import Gtk from 'gi://Gtk';
 import GLib from 'gi://GLib';
+import Gio from 'gi://Gio';
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
-
-const BLUEHUB_APP_PATH = '/home/michele/Documenti/Claude/Projects/Mio Portatile Linux/bluehub.py';
 
 export default class BlueHubPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
@@ -25,7 +24,13 @@ export default class BlueHubPreferences extends ExtensionPreferences {
         });
         btn.add_css_class('suggested-action');
         btn.connect('clicked', () => {
-            GLib.spawn_command_line_async(`/usr/bin/python3 "${BLUEHUB_APP_PATH}"`);
+            // bluehub.py si trova dentro la cartella dell'estensione
+            const appPath = GLib.build_filenamev([this.path, 'bluehub.py']);
+            try {
+                Gio.Subprocess.new(['python3', appPath], Gio.SubprocessFlags.NONE);
+            } catch (e) {
+                console.error(`[BlueHub] Impossibile aprire ${appPath}: ${e}`);
+            }
             window.close();
         });
 
