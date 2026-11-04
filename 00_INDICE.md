@@ -20,6 +20,6 @@
 - [x] Licenza GPL-2.0-or-later: file `LICENSE` + intestazioni SPDX (04/11/2026; senza campo `url`: repository privato)
 - [x] Revisione code-review + correzione di 5 errori (04/11/2026)
 - [x] Pannello riscritto in GJS dentro `prefs.js` + `bluehub-core.js`; `bluehub.py` eliminato (04/11/2026)
-- [ ] Pacchetto zip per extensions.gnome.org (con `LICENSE` dentro)
+- [x] Pacchetto zip in `dist/` (04/11/2026): `gnome-extensions pack bluehub-extension --extra-source=bluehub-core.js --extra-source=../LICENSE --out-dir=dist --force`
 - [x] Su GitHub, privato: `bria-bria/bluehub` (04/11/2026)
 - [ ] Caricamento su extensions.gnome.org (lo fa Michele)
