@@ -46,10 +46,10 @@ class BlueHubPanel {
         this._lastSharedMsg = '';
         this._scanning = false;
 
-        const cfg = Core.loadConfig();
-        this._enabled = cfg.enabled !== false;
-        this._preferredScanHci = cfg.preferred_scan_hci ?? 'auto';
-        this._micMacs = new Set((cfg.mic_enabled_macs ?? []).map(m => m.toUpperCase()));
+        // Valori iniziali: quelli veri arrivano dalla configurazione al primo aggiornamento
+        this._enabled = true;
+        this._preferredScanHci = 'auto';
+        this._micMacs = new Set();
 
         // Quote assegnate con [+ / −] (partono da 0 o dai dispositivi già connessi)
         this._quotaGamepads = 0;
@@ -241,7 +241,7 @@ class BlueHubPanel {
             return;
         }
         this._preferredScanHci = key;
-        Core.updateConfig({preferred_scan_hci: key});
+        Core.updateConfig({preferred_scan_hci: key}).catch(logError);
         this._toast(`Antenna per nuovi accoppiamenti: ${key === 'auto' ? 'Automatica (la più scarica)' : key}`);
     }
 
@@ -266,10 +266,9 @@ class BlueHubPanel {
 
     _onMasterToggle() {
         this._enabled = this._masterBtn.get_active();
-        Core.updateConfig({enabled: this._enabled});
         this._toast(this._enabled ? 'BlueHub Attivo' : 'BlueHub Disattivato');
-        // Applica subito l'audio (accende/spegne l'audio condiviso) e ridisegna tutto
-        this.refresh();
+        // Prima salva, poi applica l'audio e ridisegna (l'aggiornamento rilegge la configurazione)
+        Core.updateConfig({enabled: this._enabled}).then(() => this.refresh()).catch(logError);
     }
 
     _clampQuotas() {
@@ -363,7 +362,10 @@ class BlueHubPanel {
     }
 
     async _refreshOnce() {
-        const cfg = Core.loadConfig();
+        const cfg = await Core.loadConfig();
+        if (!this._alive) {
+            return;
+        }
         this._enabled = cfg.enabled !== false;
         this._preferredScanHci = cfg.preferred_scan_hci ?? 'auto';
         this._micMacs = new Set((cfg.mic_enabled_macs ?? []).map(m => m.toUpperCase()));
@@ -556,9 +558,9 @@ class BlueHubPanel {
         } else {
             this._micMacs.delete(dev.mac);
         }
-        Core.updateConfig({mic_enabled_macs: [...this._micMacs].sort()});
         this._toast(`${dev.name}: ${wantMic ? 'Microfono BT attivato' : 'Audio Stereo HD ripristinato (Mic spento)'}`);
-        this.refresh();
+        Core.updateConfig({mic_enabled_macs: [...this._micMacs].sort()})
+            .then(() => this.refresh()).catch(logError);
     }
 
     // ------------------------------------------------------------------

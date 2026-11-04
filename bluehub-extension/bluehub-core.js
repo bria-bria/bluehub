@@ -11,6 +11,9 @@ import GLib from 'gi://GLib';
 
 Gio._promisify(Gio.Subprocess.prototype, 'communicate_utf8_async');
 Gio._promisify(Gio.DBusConnection.prototype, 'call');
+Gio._promisify(Gio.File.prototype, 'load_contents_async');
+Gio._promisify(Gio.File.prototype, 'replace_contents_async');
+Gio._promisify(Gio.File.prototype, 'make_directory_async');
 
 export const COMBINED_SINK_NAME = 'bluehub_combined_sink';
 const COMBINED_MIC_SINK = 'bluehub_combined_mic_mix';
@@ -23,37 +26,84 @@ export const CHANNELS_PER_ADAPTER = 7;
 const CONFIG_FILE = GLib.build_filenamev([GLib.get_home_dir(), '.config', 'bluehub.json']);
 const DEFAULT_CONFIG = {enabled: true, preferred_scan_hci: 'auto', mic_enabled_macs: []};
 
+// Unico punto in cui BlueHub scrive errori nel log di sistema
+export function logBlueHubError(message) {
+    console.error(`[BlueHub] ${message}`);
+}
+
 // ------------------------------------------------------------------
 // Configurazione (~/.config/bluehub.json)
 // ------------------------------------------------------------------
 
-export function loadConfig() {
+// Lettura e scrittura sono asincrone: GNOME Shell non resta mai fermo ad aspettare il disco.
+// Legge il file. File mancante = valori predefiniti; file illeggibile o JSON non
+// valido = errore (così chi salva non lo sovrascrive cancellando le impostazioni).
+async function readConfigStrict() {
+    let contents;
     try {
-        const [ok, contents] = GLib.file_get_contents(CONFIG_FILE);
-        if (ok) {
-            return {...DEFAULT_CONFIG, ...JSON.parse(new TextDecoder().decode(contents))};
+        [contents] = await Gio.File.new_for_path(CONFIG_FILE).load_contents_async(null);
+    } catch (e) {
+        if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.NOT_FOUND)) {
+            return {...DEFAULT_CONFIG};
         }
-    } catch (_e) {}
-    return {...DEFAULT_CONFIG};
+        throw e;
+    }
+    return {...DEFAULT_CONFIG, ...JSON.parse(new TextDecoder().decode(contents))};
 }
 
-function saveConfig(cfg) {
+export async function loadConfig() {
     try {
-        GLib.mkdir_with_parents(GLib.path_get_dirname(CONFIG_FILE), 0o755);
-        // file_set_contents scrive su un file temporaneo e poi lo sostituisce (atomico)
-        GLib.file_set_contents(CONFIG_FILE, JSON.stringify(cfg, null, 2));
+        return await readConfigStrict();
     } catch (e) {
-        console.error(`[BlueHub] Errore salvataggio config: ${e}`);
+        logBlueHubError(`Configurazione non leggibile (${CONFIG_FILE}), uso i valori predefiniti: ${e}`);
+        return {...DEFAULT_CONFIG};
     }
 }
 
+async function saveConfig(cfg) {
+    const file = Gio.File.new_for_path(CONFIG_FILE);
+    const data = new TextEncoder().encode(JSON.stringify(cfg, null, 2));
+    // replace_contents scrive su un file temporaneo e poi lo sostituisce (atomico)
+    const write = () => file.replace_contents_async(data, null, false, Gio.FileCreateFlags.REPLACE_DESTINATION, null);
+    try {
+        await write();
+    } catch (e) {
+        if (!e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.NOT_FOUND)) {
+            logBlueHubError(`Errore salvataggio config: ${e}`);
+            return;
+        }
+        // Manca la cartella ~/.config: la crea e riprova
+        try {
+            await file.get_parent().make_directory_async(GLib.PRIORITY_DEFAULT, null);
+            await write();
+        } catch (e2) {
+            logBlueHubError(`Errore salvataggio config: ${e2}`);
+        }
+    }
+}
+
+// Accoda le scritture: due modifiche ravvicinate non si sovrascrivono a vicenda
+let configWriteQueue = Promise.resolve();
+
 // Rilegge il file, cambia solo le chiavi indicate e salva: non cancella le
 // modifiche fatte nel frattempo dall'altro processo (pannello o estensione).
+// Se il file esiste ma non è valido NON lo sovrascrive (non perde le impostazioni).
 export function updateConfig(changes) {
-    const cfg = loadConfig();
-    Object.assign(cfg, changes);
-    saveConfig(cfg);
-    return cfg;
+    const job = configWriteQueue.then(async () => {
+        let cfg;
+        try {
+            cfg = await readConfigStrict();
+        } catch (e) {
+            logBlueHubError(`Configurazione non valida, modifica non salvata (correggi ${CONFIG_FILE}): ${e}`);
+            return {...DEFAULT_CONFIG, ...changes};
+        }
+        Object.assign(cfg, changes);
+        await saveConfig(cfg);
+        return cfg;
+    });
+    // La coda non trattiene la configurazione: resta solo una promessa vuota
+    configWriteQueue = job.then(() => undefined, () => undefined);
+    return job;
 }
 
 // ------------------------------------------------------------------
@@ -75,7 +125,7 @@ export async function runCommand(argv, {cancellable = null, input = null, timeou
         }
         proc = Gio.Subprocess.new(argv, flags);
     } catch (e) {
-        console.error(`[BlueHub] Impossibile eseguire ${argv[0]}: ${e}`);
+        logBlueHubError(`Impossibile eseguire ${argv[0]}: ${e}`);
         return '';
     }
 
@@ -91,7 +141,7 @@ export async function runCommand(argv, {cancellable = null, input = null, timeou
         if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED)) {
             proc.force_exit();   // annullato: non lascia il comando in esecuzione
         } else {
-            console.error(`[BlueHub] Errore comando ${argv.join(' ')}: ${e}`);
+            logBlueHubError(`Errore comando ${argv.join(' ')}: ${e}`);
         }
         return '';
     } finally {
@@ -462,7 +512,7 @@ async function listNodes(kind, cancellable) {
 // "fallback_sink" in ~/.config/bluehub.json; se non è impostata (o non esiste
 // su questo PC) BlueHub non tocca nulla. Restituisce la descrizione o null.
 async function applyFallbackSink(sinks, cancellable) {
-    const fallback = loadConfig().fallback_sink;
+    const fallback = (await loadConfig()).fallback_sink;
     const sink = fallback ? sinks.find(s => s.name === fallback) : null;
     if (!sink) {
         return null;

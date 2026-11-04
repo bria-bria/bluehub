@@ -18,15 +18,14 @@ import * as Core from './bluehub-core.js';
 const BlueHubQuickToggle = GObject.registerClass(
 class BlueHubQuickToggle extends QuickMenuToggle {
     _init(extension) {
-        const cfg = Core.loadConfig();
-        const isEnabled = cfg.enabled !== false;
-
+        // Lo stato vero (attivo/disattivato) arriva dalla configurazione, letta
+        // in modo asincrono dal primo aggiornamento qui sotto
         super._init({
             title: 'BlueHub',
-            subtitle: isEnabled ? 'Attivo' : 'Disattivato',
+            subtitle: 'Lettura...',
             iconName: 'bluetooth-active-symbolic',
             toggleMode: true,
-            checked: isEnabled,
+            checked: false,
         });
 
         // Per annullare i comandi in corso quando l'estensione viene disattivata
@@ -34,6 +33,8 @@ class BlueHubQuickToggle extends QuickMenuToggle {
         this._refreshing = false;
         this._refreshAgain = false;
         this._lastBtSinks = null;   // cuffie BT viste all'ultimo aggiornamento
+        this._configLoaded = false; // diventa true dopo la prima lettura della configurazione
+        // Annulla anche se il pulsante viene distrutto senza passare da destroy() JS
         this.connect('destroy', () => this._cancellable.cancel());
 
         this.menu.setHeader('bluetooth-active-symbolic', 'BlueHub', 'Gestione Canali Bluetooth & Audio Condiviso');
@@ -52,12 +53,20 @@ class BlueHubQuickToggle extends QuickMenuToggle {
         this.menu.addMenuItem(openAppItem);
 
         // Quando si clicca sul tasto principale: attiva/disattiva BlueHub
+        // (prima salva, poi aggiorna: così l'aggiornamento legge il valore nuovo)
         this.connect('clicked', () => {
-            Core.updateConfig({enabled: this.checked});
-            this._refreshState();
+            // Configurazione non ancora letta: lo stato mostrato non è quello vero,
+            // quindi il clic non salva nulla e si rilegge lo stato reale
+            if (!this._configLoaded) {
+                this._refreshState();
+                return;
+            }
+            Core.updateConfig({enabled: this.checked})
+                .then(() => this._refreshState())
+                .catch(e => Core.logBlueHubError(`Errore salvataggio: ${e}`));
         });
 
-        this.menu.connect('open-state-changed', (_menu, isOpen) => {
+        this._menuOpenId = this.menu.connect('open-state-changed', (_menu, isOpen) => {
             if (isOpen) {
                 this._refreshState();
             }
@@ -66,9 +75,22 @@ class BlueHubQuickToggle extends QuickMenuToggle {
         this._refreshState();
     }
 
+    // Chiamato da disable(): ferma i comandi in corso, scollega i segnali e
+    // libera le righe del menu prima di distruggere il pulsante
+    destroy() {
+        this._cancellable.cancel();
+        if (this._menuOpenId) {
+            this.menu.disconnect(this._menuOpenId);
+            this._menuOpenId = 0;
+        }
+        this._statusItem?.destroy();
+        this._statusItem = null;
+        super.destroy();
+    }
+
     // Avvia un aggiornamento senza bloccare GNOME
     _refreshState() {
-        this._doRefresh().catch(e => console.error(`[BlueHub] Errore aggiornamento: ${e}`));
+        this._doRefresh().catch(e => Core.logBlueHubError(`Errore aggiornamento: ${e}`));
     }
 
     async _doRefresh() {
@@ -82,11 +104,15 @@ class BlueHubQuickToggle extends QuickMenuToggle {
             do {
                 this._refreshAgain = false;
 
-                const cfg = Core.loadConfig();
+                const cfg = await Core.loadConfig();
+                if (this._cancellable.is_cancelled()) {
+                    return;
+                }
                 const isEnabled = cfg.enabled !== false;
                 if (this.checked !== isEnabled) {
                     this.checked = isEnabled;
                 }
+                this._configLoaded = true;
 
                 const hw = Core.getHardwareChannelStats();
                 const audio = await Core.applySharedAudioState(isEnabled, this._lastBtSinks, this._cancellable);
