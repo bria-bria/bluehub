@@ -13,9 +13,9 @@
 ## Strada verso extensions.gnome.org
 - [x] Cartella dedicata + git locale (04/11/2026)
 - [x] `bluehub.py` dentro l'estensione, percorso relativo (04/11/2026, ramo `ego/percorso-relativo`)
-- [ ] Comandi `pactl` asincroni
+- [x] Comandi `pactl` asincroni (04/11/2026)
 - [ ] Togliere impostazioni specifiche dell'XPS 17
-- [ ] Nuovo UUID
-- [ ] Licenza + campo `url`
-- [ ] Pubblicazione su GitHub (con ok di Michele)
+- [ ] Nuovo UUID (`bluehub@bria-bria.github.io`)
+- [ ] Licenza GPL (senza campo `url`: repository privato)
+- [x] Su GitHub, privato: `bria-bria/bluehub` (04/11/2026)
 - [ ] Caricamento su extensions.gnome.org (lo fa Michele)

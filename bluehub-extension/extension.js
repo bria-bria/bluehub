@@ -22,16 +22,21 @@ function launchApp(extensionPath) {
     }
 }
 
-function runCommand(argv) {
+Gio._promisify(Gio.Subprocess.prototype, 'communicate_utf8_async');
+
+// Esegue un comando SENZA bloccare GNOME Shell: restituisce lo stdout (o '' se fallisce).
+async function runCommand(argv, cancellable = null) {
     try {
         const proc = Gio.Subprocess.new(
             argv,
             Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE
         );
-        const [, stdout] = proc.communicate_utf8(null, null);
-        return stdout || '';
+        const [stdout] = await proc.communicate_utf8_async(null, cancellable);
+        return stdout ?? '';
     } catch (e) {
-        console.error(`[BlueHub] Errore comando ${argv.join(' ')}: ${e}`);
+        if (!e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED)) {
+            console.error(`[BlueHub] Errore comando ${argv.join(' ')}: ${e}`);
+        }
         return '';
     }
 }
@@ -77,25 +82,25 @@ function getHardwareChannelStats() {
     return {totalChannels, activeLinks: links, freeChannels};
 }
 
-function applySharedAudioState(enabled) {
+async function applySharedAudioState(enabled, cancellable) {
     // Rimuove eventuali vecchi combine-sink
-    const modulesOut = runCommand(['pactl', 'list', 'short', 'modules']);
+    const modulesOut = await runCommand(['pactl', 'list', 'short', 'modules'], cancellable);
     for (const line of modulesOut.split('\n')) {
         if (line.includes('module-combine-sink') &&
             (line.includes(COMBINED_SINK_NAME) || line.includes('multy_bt_sink') || line.includes('audio_condiviso_scelto'))) {
             const id = line.trim().split(/\s+/)[0];
             if (id) {
-                runCommand(['pactl', 'unload-module', id]);
+                await runCommand(['pactl', 'unload-module', id], cancellable);
             }
         }
     }
 
     if (!enabled) {
-        runCommand(['pactl', 'set-default-sink', 'effect_input.xps17_eq']);
+        await runCommand(['pactl', 'set-default-sink', 'effect_input.xps17_eq'], cancellable);
         return 0;
     }
 
-    const out = runCommand(['pactl', '-f', 'json', 'list', 'sinks']);
+    const out = await runCommand(['pactl', '-f', 'json', 'list', 'sinks'], cancellable);
     if (!out) return 0;
     const btSinks = [];
     try {
@@ -111,19 +116,19 @@ function applySharedAudioState(enabled) {
     }
 
     if (btSinks.length >= 2) {
-        runCommand([
+        await runCommand([
             'pactl',
             'load-module',
             'module-combine-sink',
             `sink_name=${COMBINED_SINK_NAME}`,
             `slaves=${btSinks.join(',')}`,
             'sink_properties=device.description="BlueHub_Audio_Condiviso_Automatico"',
-        ]);
-        runCommand(['pactl', 'set-default-sink', COMBINED_SINK_NAME]);
+        ], cancellable);
+        await runCommand(['pactl', 'set-default-sink', COMBINED_SINK_NAME], cancellable);
     } else if (btSinks.length === 1) {
-        runCommand(['pactl', 'set-default-sink', btSinks[0]]);
+        await runCommand(['pactl', 'set-default-sink', btSinks[0]], cancellable);
     } else {
-        runCommand(['pactl', 'set-default-sink', 'effect_input.xps17_eq']);
+        await runCommand(['pactl', 'set-default-sink', 'effect_input.xps17_eq'], cancellable);
     }
     return btSinks.length;
 }
@@ -141,6 +146,12 @@ class BlueHubQuickToggle extends QuickMenuToggle {
             toggleMode: true,
             checked: isEnabled,
         });
+
+        // Per annullare i comandi in corso quando l'estensione viene disattivata
+        this._cancellable = new Gio.Cancellable();
+        this._refreshing = false;
+        this._refreshAgain = false;
+        this.connect('destroy', () => this._cancellable.cancel());
 
         this.menu.setHeader('bluetooth-active-symbolic', 'BlueHub', 'Gestione Canali Bluetooth & Audio Condiviso');
 
@@ -173,25 +184,49 @@ class BlueHubQuickToggle extends QuickMenuToggle {
         this._refreshState();
     }
 
+    // Avvia un aggiornamento senza bloccare GNOME
     _refreshState() {
-        const cfg = loadConfig();
-        const isEnabled = cfg.enabled !== false;
-        if (this.checked !== isEnabled) {
-            this.checked = isEnabled;
+        this._doRefresh().catch(e => console.error(`[BlueHub] Errore aggiornamento: ${e}`));
+    }
+
+    async _doRefresh() {
+        // Se un aggiornamento è già in corso, ne chiede solo un altro alla fine
+        if (this._refreshing) {
+            this._refreshAgain = true;
+            return;
         }
+        this._refreshing = true;
+        try {
+            do {
+                this._refreshAgain = false;
 
-        const hw = getHardwareChannelStats();
-        const btAudioCount = applySharedAudioState(isEnabled);
+                const cfg = loadConfig();
+                const isEnabled = cfg.enabled !== false;
+                if (this.checked !== isEnabled) {
+                    this.checked = isEnabled;
+                }
 
-        if (!isEnabled) {
-            this.subtitle = 'Disattivato';
-            this._statusItem.label.text = '⚪ Estensione disattivata';
-        } else if (btAudioCount >= 2) {
-            this.subtitle = `Condiviso (${btAudioCount} cuffie)`;
-            this._statusItem.label.text = `🟢 ${hw.activeLinks}/${hw.totalChannels} canali usati • 🎶 ${btAudioCount} cuffie unite`;
-        } else {
-            this.subtitle = `${hw.freeChannels}/${hw.totalChannels} canali liberi`;
-            this._statusItem.label.text = `🟢 ${hw.activeLinks}/${hw.totalChannels} canali in uso (${hw.freeChannels} liberi)`;
+                const hw = getHardwareChannelStats();
+                const btAudioCount = await applySharedAudioState(isEnabled, this._cancellable);
+
+                // Estensione disattivata mentre i comandi giravano: non toccare più il pulsante
+                if (this._cancellable.is_cancelled()) {
+                    return;
+                }
+
+                if (!isEnabled) {
+                    this.subtitle = 'Disattivato';
+                    this._statusItem.label.text = '⚪ Estensione disattivata';
+                } else if (btAudioCount >= 2) {
+                    this.subtitle = `Condiviso (${btAudioCount} cuffie)`;
+                    this._statusItem.label.text = `🟢 ${hw.activeLinks}/${hw.totalChannels} canali usati • 🎶 ${btAudioCount} cuffie unite`;
+                } else {
+                    this.subtitle = `${hw.freeChannels}/${hw.totalChannels} canali liberi`;
+                    this._statusItem.label.text = `🟢 ${hw.activeLinks}/${hw.totalChannels} canali in uso (${hw.freeChannels} liberi)`;
+                }
+            } while (this._refreshAgain);
+        } finally {
+            this._refreshing = false;
         }
     }
 });
