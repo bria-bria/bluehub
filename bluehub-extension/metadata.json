@@ -1,7 +1,7 @@
 {
   "name": "BlueHub",
   "description": "BlueHub — Gestione connessioni Bluetooth multiple (2+ Gamepad, 2+ Cuffie/Casse) e Audio Condiviso selettivo per GNOME.",
-  "uuid": "bluehub@michele.local",
+  "uuid": "bluehub@bria-bria.github.io",
   "shell-version": [
     "45",
     "46",

@@ -1238,7 +1238,7 @@ class BlueHubWindow(Adw.ApplicationWindow):
 
 class BlueHubApp(Adw.Application):
     def __init__(self):
-        super().__init__(application_id='local.michele.BlueHub')
+        super().__init__(application_id='io.github.bria_bria.BlueHub')
 
     def do_startup(self):
         Adw.Application.do_startup(self)

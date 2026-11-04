@@ -2,7 +2,8 @@
 # ============================================================
 #  installa-bluehub.sh
 #  1. Chiude eventuali finestre precedenti di BlueHub
-#  2. Aggiorna l'estensione GNOME Shell "BlueHub" (bluehub@michele.local)
+#  2. Aggiorna l'estensione GNOME Shell "BlueHub" (UUID letto da metadata.json)
+#     e rimuove la vecchia versione con UUID bluehub@michele.local
 #  3. Aggiorna la scorciatoia nel menu Applicazioni
 #  4. Apre la finestra aggiornata di BlueHub
 #
@@ -19,12 +20,11 @@ fi
 
 # --- Percorsi (ricavati, non scritti a mano) ---
 PROJ_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
-EXT_UUID="bluehub@michele.local"
 EXT_SRC="$PROJ_DIR/bluehub-extension"
-EXT_DEST="$HOME/.local/share/gnome-shell/extensions/$EXT_UUID"
-APP="$EXT_DEST/bluehub.py"                # il pannello gira dalla copia installata
+EXT_ROOT="$HOME/.local/share/gnome-shell/extensions"
+OLD_UUID="bluehub@michele.local"          # vecchia versione, da togliere
+APP_ID="io.github.bria_bria.BlueHub"      # deve coincidere con application_id in bluehub.py
 DESKTOP_DIR="$HOME/.local/share/applications"
-APP_ID="local.michele.BlueHub"
 LOG_FILE="$HOME/.cache/bluehub.log"
 EXT_FILES=(metadata.json extension.js prefs.js bluehub.py)
 
@@ -35,6 +35,11 @@ for f in "${EXT_FILES[@]/#/$EXT_SRC/}"; do
         exit 1
     fi
 done
+
+# UUID: unica fonte è metadata.json
+EXT_UUID="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["uuid"])' "$EXT_SRC/metadata.json")"
+EXT_DEST="$EXT_ROOT/$EXT_UUID"
+APP="$EXT_DEST/bluehub.py"                # il pannello gira dalla copia installata
 
 # --- 1. Chiude solo i processi Python di BlueHub (non l'editor) e aspetta che escano ---
 PATTERN="python3? .*bluehub\.py"
@@ -61,9 +66,26 @@ for f in "${EXT_FILES[@]}"; do
     fi
 done
 
-# 'enable' aggiunge da solo l'estensione alla lista di GNOME: niente gsettings a mano
+# Toglie la vecchia versione (altrimenti al login comparirebbero due pulsanti BlueHub)
+if [[ "$OLD_UUID" != "$EXT_UUID" && -d "$EXT_ROOT/$OLD_UUID" ]]; then
+    gnome-extensions disable "$OLD_UUID" 2>/dev/null || true
+    rm -rf -- "${EXT_ROOT:?}/$OLD_UUID"
+    echo "Rimossa la vecchia estensione $OLD_UUID."
+    EXT_CHANGED=1
+fi
+
+# Attiva la nuova. Se GNOME non la conosce ancora (estensione appena installata,
+# su Wayland serve il login), la aggiunge alla lista così parte al prossimo login.
 if ! gnome-extensions enable "$EXT_UUID" 2>/dev/null; then
-    echo "ATTENZIONE: GNOME non vede ancora l'estensione: verrà attivata al prossimo login." >&2
+    CURRENT="$(gsettings get org.gnome.shell enabled-extensions)"
+    if [[ "$CURRENT" != *"'$EXT_UUID'"* ]]; then
+        if [[ "$CURRENT" == "@as []" || "$CURRENT" == "[]" ]]; then
+            gsettings set org.gnome.shell enabled-extensions "['$EXT_UUID']"
+        else
+            gsettings set org.gnome.shell enabled-extensions "${CURRENT%]}, '$EXT_UUID']"
+        fi
+    fi
+    echo "La nuova estensione $EXT_UUID verrà attivata al prossimo login."
     EXT_CHANGED=1
 fi
 
