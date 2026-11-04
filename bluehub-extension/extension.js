@@ -170,11 +170,6 @@ class BlueHubSystemIndicator extends SystemIndicator {
         // solo il pulsante grande nel menu rapido di GNOME!
         this._toggle = new BlueHubQuickToggle(extension);
         this.quickSettingsItems.push(this._toggle);
-        // Quando GNOME si chiude smonta il menu rapido e distrugge il pulsante:
-        // da quel momento non va più usato (evita errori "already disposed")
-        this._toggle.connect('destroy', () => {
-            this._toggle = null;
-        });
     }
 });
 
@@ -195,6 +190,11 @@ export default class BlueHubExtension extends Extension {
                     this._updateGridPositionAndSpan();
                 }),
                 grid.connect('child-removed', (_g, child) => {
+                    // Quando GNOME si chiude smonta il menu rapido e distrugge il
+                    // pulsante: da quel momento non va più usato ("already disposed")
+                    if (this._indicator && child === this._indicator._toggle) {
+                        this._indicator._toggle = null;
+                    }
                     this._untrackChild(child);
                     this._updateGridPositionAndSpan();
                 })
