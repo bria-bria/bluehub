@@ -22,5 +22,5 @@
 - [x] Pannello riscritto in GJS dentro `prefs.js` + `bluehub-core.js`; `bluehub.py` eliminato (04/11/2026)
 - [x] Pacchetto zip in `dist/` (04/11/2026): `gnome-extensions pack bluehub-extension --extra-source=bluehub-core.js --extra-source=../LICENSE --out-dir=dist --force`
 - [x] Su GitHub `bria-bria/bluehub`, email dei commit resa anonima; campo `url` in metadata.json (04/11/2026)
-- [ ] Repository reso pubblico (dopo il push della cronologia pulita)
+- [x] Repository reso pubblico, `main` all'ultima versione (04/11/2026)
 - [ ] Caricamento su extensions.gnome.org (lo fa Michele)
