@@ -17,9 +17,10 @@
 - [x] Comandi `pactl` asincroni (04/11/2026)
 - [x] Tolte impostazioni specifiche dell'XPS 17: ora "fallback_sink" in ~/.config/bluehub.json (04/11/2026)
 - [x] Nuovo UUID `bluehub@bria-bria.github.io` e app id `io.github.bria_bria.BlueHub` (04/11/2026)
-- [x] Licenza GPL-2.0-or-later: file `LICENSE` + intestazioni SPDX (04/11/2026; senza campo `url`: repository privato)
+- [x] Licenza GPL-2.0-or-later: file `LICENSE` + intestazioni SPDX (04/11/2026)
 - [x] Revisione code-review + correzione di 5 errori (04/11/2026)
 - [x] Pannello riscritto in GJS dentro `prefs.js` + `bluehub-core.js`; `bluehub.py` eliminato (04/11/2026)
 - [x] Pacchetto zip in `dist/` (04/11/2026): `gnome-extensions pack bluehub-extension --extra-source=bluehub-core.js --extra-source=../LICENSE --out-dir=dist --force`
-- [x] Su GitHub, privato: `bria-bria/bluehub` (04/11/2026)
+- [x] Su GitHub `bria-bria/bluehub`, email dei commit resa anonima; campo `url` in metadata.json (04/11/2026)
+- [ ] Repository reso pubblico (dopo il push della cronologia pulita)
 - [ ] Caricamento su extensions.gnome.org (lo fa Michele)
