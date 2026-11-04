@@ -16,6 +16,18 @@ Gestione di più connessioni Bluetooth contemporanee su GNOME:
 - Python 3 con PyGObject, GTK 4 e libadwaita
 - BlueZ (`bluetoothctl`) e PipeWire con `pipewire-pulse` (`pactl`)
 
+## Configurazione
+
+Le impostazioni stanno in `~/.config/bluehub.json`. Facoltativo:
+
+```json
+{ "fallback_sink": "nome-dell-uscita" }
+```
+
+`fallback_sink` è l'uscita audio da usare quando non ci sono cuffie Bluetooth
+o BlueHub è spento (i nomi si vedono con `pactl list short sinks`).
+Se non è impostata, BlueHub lascia scegliere al sistema.
+
 ## Installazione (sviluppo)
 
 ```bash

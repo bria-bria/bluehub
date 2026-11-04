@@ -14,7 +14,7 @@
 - [x] Cartella dedicata + git locale (04/11/2026)
 - [x] `bluehub.py` dentro l'estensione, percorso relativo (04/11/2026, ramo `ego/percorso-relativo`)
 - [x] Comandi `pactl` asincroni (04/11/2026)
-- [ ] Togliere impostazioni specifiche dell'XPS 17
+- [x] Tolte impostazioni specifiche dell'XPS 17: ora "fallback_sink" in ~/.config/bluehub.json (04/11/2026)
 - [ ] Nuovo UUID (`bluehub@bria-bria.github.io`)
 - [ ] Licenza GPL (senza campo `url`: repository privato)
 - [x] Su GitHub, privato: `bria-bria/bluehub` (04/11/2026)

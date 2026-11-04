@@ -82,53 +82,76 @@ function getHardwareChannelStats() {
     return {totalChannels, activeLinks: links, freeChannels};
 }
 
+// Uscita audio da usare quando non c'è audio Bluetooth (o BlueHub è spento).
+// Si sceglie con "fallback_sink" in ~/.config/bluehub.json; se non è impostata
+// (o non esiste su questo PC) BlueHub non tocca nulla e decide il sistema.
+async function applyFallbackSink(allSinkNames, cancellable) {
+    const fallback = loadConfig().fallback_sink;
+    if (fallback && allSinkNames.includes(fallback)) {
+        await runCommand(['pactl', 'set-default-sink', fallback], cancellable);
+    }
+}
+
 async function applySharedAudioState(enabled, cancellable) {
-    // Rimuove eventuali vecchi combine-sink
-    const modulesOut = await runCommand(['pactl', 'list', 'short', 'modules'], cancellable);
+    const [modulesOut, sinksOut] = await Promise.all([
+        runCommand(['pactl', 'list', 'short', 'modules'], cancellable),
+        runCommand(['pactl', '-f', 'json', 'list', 'sinks'], cancellable),
+    ]);
+
+    let allSinkNames = [];
+    try {
+        allSinkNames = JSON.parse(sinksOut || '[]').map(s => s.name || '');
+    } catch (_e) {
+        return 0;
+    }
+    // Ordinate, così la stessa coppia di cuffie dà sempre la stessa riga "slaves="
+    const btSinks = allSinkNames.filter(n => n.startsWith('bluez_output.')).sort();
+
+    const wantCombined = enabled && btSinks.length >= 2;
+    const wantedSlaves = `slaves=${btSinks.join(',')}`;
+
+    // Combine-sink di BlueHub già presenti (anche con i vecchi nomi):
+    // se uno ha già esattamente queste cuffie lo tiene, gli altri li rimuove.
+    // Così aprire il menu non interrompe l'audio se non è cambiato nulla.
+    let keepExisting = false;
     for (const line of modulesOut.split('\n')) {
-        if (line.includes('module-combine-sink') &&
-            (line.includes(COMBINED_SINK_NAME) || line.includes('multy_bt_sink') || line.includes('audio_condiviso_scelto'))) {
-            const id = line.trim().split(/\s+/)[0];
-            if (id) {
-                await runCommand(['pactl', 'unload-module', id], cancellable);
-            }
+        if (!line.includes('module-combine-sink') ||
+            !(line.includes(COMBINED_SINK_NAME) || line.includes('multy_bt_sink') || line.includes('audio_condiviso_scelto'))) {
+            continue;
+        }
+        const [id, , args = ''] = line.trim().split('\t');
+        const argList = args.split(/\s+/);
+        if (wantCombined && !keepExisting &&
+            argList.includes(`sink_name=${COMBINED_SINK_NAME}`) && argList.includes(wantedSlaves)) {
+            keepExisting = true;
+            continue;
+        }
+        if (id) {
+            await runCommand(['pactl', 'unload-module', id], cancellable);
         }
     }
 
     if (!enabled) {
-        await runCommand(['pactl', 'set-default-sink', 'effect_input.xps17_eq'], cancellable);
+        await applyFallbackSink(allSinkNames, cancellable);
         return 0;
     }
 
-    const out = await runCommand(['pactl', '-f', 'json', 'list', 'sinks'], cancellable);
-    if (!out) return 0;
-    const btSinks = [];
-    try {
-        const sinks = JSON.parse(out);
-        for (const s of sinks) {
-            const name = s.name || '';
-            if (name.startsWith('bluez_output.')) {
-                btSinks.push(name);
-            }
+    if (wantCombined) {
+        if (!keepExisting) {
+            await runCommand([
+                'pactl',
+                'load-module',
+                'module-combine-sink',
+                `sink_name=${COMBINED_SINK_NAME}`,
+                wantedSlaves,
+                'sink_properties=device.description="BlueHub_Audio_Condiviso_Automatico"',
+            ], cancellable);
         }
-    } catch (_e) {
-        return 0;
-    }
-
-    if (btSinks.length >= 2) {
-        await runCommand([
-            'pactl',
-            'load-module',
-            'module-combine-sink',
-            `sink_name=${COMBINED_SINK_NAME}`,
-            `slaves=${btSinks.join(',')}`,
-            'sink_properties=device.description="BlueHub_Audio_Condiviso_Automatico"',
-        ], cancellable);
         await runCommand(['pactl', 'set-default-sink', COMBINED_SINK_NAME], cancellable);
     } else if (btSinks.length === 1) {
         await runCommand(['pactl', 'set-default-sink', btSinks[0]], cancellable);
     } else {
-        await runCommand(['pactl', 'set-default-sink', 'effect_input.xps17_eq'], cancellable);
+        await applyFallbackSink(allSinkNames, cancellable);
     }
     return btSinks.length;
 }

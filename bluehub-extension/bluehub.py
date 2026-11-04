@@ -402,7 +402,7 @@ def get_bt_audio_sinks():
 
 
 def get_bt_audio_sources():
-    """Restituisce i microfoni Bluetooth attivi (bluez_input.*) senza mai includere il microfono interno dell'XPS."""
+    """Restituisce i microfoni Bluetooth attivi (bluez_input.*) senza mai includere il microfono interno del PC."""
     out = run_cmd(['pactl', '-f', 'json', 'list', 'sources'])
     if not out:
         return []
@@ -491,12 +491,34 @@ def sync_bt_microphones(enabled=True, mic_enabled_macs=None):
     return " • 🔒 Cuffie protette in Stereo HD (Mic BT spenti)"
 
 
+def apply_fallback_sink():
+    """
+    Uscita audio da usare quando non c'è audio Bluetooth (o BlueHub è spento).
+    Si sceglie con "fallback_sink" in ~/.config/bluehub.json; se non è impostata
+    (o non esiste su questo PC) BlueHub non tocca nulla e decide il sistema.
+    Restituisce la descrizione dell'uscita impostata, oppure None.
+    """
+    fallback = load_config().get('fallback_sink')
+    if not fallback:
+        return None
+    out = run_cmd(['pactl', '-f', 'json', 'list', 'sinks'])
+    try:
+        for s in json.loads(out) if out else []:
+            if s.get('name') == fallback:
+                run_cmd(['pactl', 'set-default-sink', fallback])
+                props = s.get('properties', {})
+                return props.get('device.description') or s.get('description') or fallback
+    except Exception:
+        pass
+    return None
+
+
 def sync_automatic_shared_audio(enabled=True, mic_enabled_macs=None):
     unload_combined()
 
     if not enabled:
         unload_combined_mics()
-        run_cmd(['pactl', 'set-default-sink', 'effect_input.xps17_eq'])
+        apply_fallback_sink()
         return "⚪ BlueHub Disattivato — Condivisione audio spenta"
 
     mic_msg = sync_bt_microphones(enabled=True, mic_enabled_macs=mic_enabled_macs)
@@ -517,8 +539,10 @@ def sync_automatic_shared_audio(enabled=True, mic_enabled_macs=None):
         run_cmd(['pactl', 'set-default-sink', bt_sinks[0]['name']])
         return f"🎧 Audio su: {bt_sinks[0]['desc']}{mic_msg}"
     else:
-        run_cmd(['pactl', 'set-default-sink', 'effect_input.xps17_eq'])
-        return "🔊 Nessuna cuffia BT connessa — Audio attivo su: Altoparlanti XPS 17 (Ottimizzati)"
+        fallback_desc = apply_fallback_sink()
+        if fallback_desc:
+            return f"🔊 Nessuna cuffia BT connessa — Audio attivo su: {fallback_desc}"
+        return "🔊 Nessuna cuffia BT connessa — Audio sull'uscita predefinita del sistema"
 
 
 class BlueHubWindow(Adw.ApplicationWindow):

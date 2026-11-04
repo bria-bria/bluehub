@@ -19,7 +19,7 @@ non più usata). Dal 04/11/2026 l'installazione si fa da qui con
 Cose da sistemare prima (vedi `00_INDICE.md`):
 1. ~~`bluehub.py` dentro l'estensione, aperto con percorso relativo (`this.path`)~~ fatto
 2. ~~comandi `pactl` asincroni~~ fatto
-3. togliere `effect_input.xps17_eq` (esiste solo sull'XPS 17 di Michele)
+3. ~~togliere `effect_input.xps17_eq`~~ fatto: ora è "fallback_sink" nel `~/.config/bluehub.json` di Michele
 4. UUID legato all'account GitHub: `bluehub@bria-bria.github.io`
 5. licenza GPL-2.0-or-later nel pacchetto; **niente campo `url`** in
    `metadata.json` finché il repository è privato (darebbe 404)
