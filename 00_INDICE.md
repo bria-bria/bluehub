@@ -24,7 +24,6 @@
 - [x] Pacchetto zip in `dist/` (04/11/2026): `gnome-extensions pack bluehub-extension --extra-source=bluehub-core.js --extra-source=bluehub-i18n.js --extra-source=../LICENSE --out-dir=dist --force`
 - [x] Su GitHub `bria-bria/bluehub`, email dei commit resa anonima; campo `url` in metadata.json (04/11/2026)
 - [x] Repository reso pubblico, `main` all'ultima versione (04/11/2026)
-- [ ] Caricamento su extensions.gnome.org (lo fa Michele)
 - [x] Versione 1 caricata su extensions.gnome.org: estensione 11630 (04/11/2026)
 - [x] Traduzioni: inglese di base, italiano incluso, file utente per le altre lingue (04/11/2026)
 - [ ] Versione 2 (traduzioni) da caricare su extensions.gnome.org
