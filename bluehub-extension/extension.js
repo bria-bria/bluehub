@@ -14,6 +14,7 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import {QuickMenuToggle, SystemIndicator} from 'resource:///org/gnome/shell/ui/quickSettings.js';
 
 import * as Core from './bluehub-core.js';
+import {_, loadUserTranslations, unloadUserTranslations} from './bluehub-i18n.js';
 
 const BlueHubQuickToggle = GObject.registerClass(
 class BlueHubQuickToggle extends QuickMenuToggle {
@@ -22,7 +23,7 @@ class BlueHubQuickToggle extends QuickMenuToggle {
         // in modo asincrono dal primo aggiornamento qui sotto
         super._init({
             title: 'BlueHub',
-            subtitle: 'Lettura...',
+            subtitle: _('Loading...'),
             iconName: 'bluetooth-active-symbolic',
             toggleMode: true,
             checked: false,
@@ -37,20 +38,20 @@ class BlueHubQuickToggle extends QuickMenuToggle {
         // Annulla anche se il pulsante viene distrutto senza passare da destroy() JS
         this.connect('destroy', () => this._cancellable.cancel());
 
-        this.menu.setHeader('bluetooth-active-symbolic', 'BlueHub', 'Gestione Canali Bluetooth & Audio Condiviso');
 
-        this._statusItem = new PopupMenu.PopupMenuItem('📡 Lettura canali...', {reactive: false});
+        this._statusItem = new PopupMenu.PopupMenuItem(_('📡 Reading channels...'), {reactive: false});
         this.menu.addMenuItem(this._statusItem);
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
-        const openAppItem = new PopupMenu.PopupMenuItem('🚀 Apri Pannello Canali BlueHub (+ / −)');
-        openAppItem.connect('activate', () => {
+        this._openItem = new PopupMenu.PopupMenuItem('');
+        this._openItem.connect('activate', () => {
             Main.panel.statusArea.quickSettings.menu.close();
             // Il pannello è la finestra Preferenze dell'estensione (prefs.js)
             extension.openPreferences();
         });
-        this.menu.addMenuItem(openAppItem);
+        this.menu.addMenuItem(this._openItem);
+        this._applyStaticTexts();
 
         // Quando si clicca sul tasto principale: attiva/disattiva BlueHub
         // (prima salva, poi aggiorna: così l'aggiornamento legge il valore nuovo)
@@ -72,7 +73,22 @@ class BlueHubQuickToggle extends QuickMenuToggle {
             }
         });
 
+        // Lingue diverse da italiano/inglese: carica il file dell'utente, poi ritraduce
+        loadUserTranslations()
+            .then(() => {
+                if (!this._cancellable.is_cancelled()) {
+                    this._applyStaticTexts();
+                    this._refreshState();
+                }
+            })
+            .catch(e => Core.logBlueHubError(`Translations: ${e}`));
         this._refreshState();
+    }
+
+    // Testi che non cambiano con lo stato (intestazione e voce del pannello)
+    _applyStaticTexts() {
+        this.menu.setHeader('bluetooth-active-symbolic', 'BlueHub', _('Bluetooth channels & shared audio'));
+        this._openItem.label.text = _('🚀 Open BlueHub channel panel (+ / −)');
     }
 
     // Chiamato da disable(): ferma i comandi in corso, scollega i segnali e
@@ -85,6 +101,8 @@ class BlueHubQuickToggle extends QuickMenuToggle {
         }
         this._statusItem?.destroy();
         this._statusItem = null;
+        this._openItem?.destroy();
+        this._openItem = null;
         super.destroy();
     }
 
@@ -125,14 +143,16 @@ class BlueHubQuickToggle extends QuickMenuToggle {
                 const btAudioCount = audio.count;
 
                 if (!isEnabled) {
-                    this.subtitle = 'Disattivato';
-                    this._statusItem.label.text = '⚪ Estensione disattivata';
+                    this.subtitle = _('Off');
+                    this._statusItem.label.text = _('⚪ BlueHub off');
                 } else if (btAudioCount >= 2) {
-                    this.subtitle = `Condiviso (${btAudioCount} cuffie)`;
-                    this._statusItem.label.text = `🟢 ${hw.activeLinks}/${hw.totalChannels} canali usati • 🎶 ${btAudioCount} cuffie unite`;
+                    this.subtitle = _('Shared ({count} headphones)', {count: btAudioCount});
+                    this._statusItem.label.text = _('🟢 {used}/{total} channels used • 🎶 {count} headphones joined',
+                        {used: hw.activeLinks, total: hw.totalChannels, count: btAudioCount});
                 } else {
-                    this.subtitle = `${hw.freeChannels}/${hw.totalChannels} canali liberi`;
-                    this._statusItem.label.text = `🟢 ${hw.activeLinks}/${hw.totalChannels} canali in uso (${hw.freeChannels} liberi)`;
+                    this.subtitle = _('{free}/{total} channels free', {free: hw.freeChannels, total: hw.totalChannels});
+                    this._statusItem.label.text = _('🟢 {used}/{total} channels in use ({free} free)',
+                        {used: hw.activeLinks, total: hw.totalChannels, free: hw.freeChannels});
                 }
             } while (this._refreshAgain);
         } finally {
@@ -265,5 +285,6 @@ export default class BlueHubExtension extends Extension {
             this._indicator.destroy();
             this._indicator = null;
         }
+        unloadUserTranslations();
     }
 }

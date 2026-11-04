@@ -17,11 +17,14 @@ import GLib from 'gi://GLib';
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
 import * as Core from './bluehub-core.js';
+import {_, loadUserTranslations} from './bluehub-i18n.js';
 
 const SCAN_SECONDS = 8;
 const CH = Core.CHANNELS_PER_ADAPTER;
 
 export default class BlueHubPreferences extends ExtensionPreferences {
+    // Sincrona: GNOME 45/46 non attendono una funzione async e mostrerebbero
+    // "nessuna interfaccia". Le traduzioni dell'utente arrivano subito dopo.
     fillPreferencesWindow(window) {
         window.set_default_size(720, 820);
         window.set_search_enabled(false);
@@ -66,7 +69,17 @@ class BlueHubPanel {
 
         this.page = new Adw.PreferencesPage();
         this._buildUi();
-        this.refresh();
+
+        // Lingue diverse da italiano/inglese: carica (e completa con le frasi nuove)
+        // il file di traduzione dell'utente, poi ritraduce e aggiorna
+        loadUserTranslations({merge: true})
+            .catch(logError)
+            .finally(() => {
+                if (this._alive) {
+                    this._applyStaticTexts();
+                    this.refresh();
+                }
+            });
     }
 
     destroy() {
@@ -87,29 +100,25 @@ class BlueHubPanel {
 
     _buildUi() {
         // --- Scheda estensione: attivazione + Cerca BT + antenne ---
-        const extGroup = new Adw.PreferencesGroup({title: '⚙️ Scheda Estensione BlueHub'});
+        const extGroup = new Adw.PreferencesGroup();
+        this._extGroup = extGroup;
         const refreshBtn = new Gtk.Button({
             icon_name: 'view-refresh-symbolic',
-            tooltip_text: 'Aggiorna antenne, canali e dispositivi',
             valign: Gtk.Align.CENTER,
         });
+        this._refreshBtn = refreshBtn;
         refreshBtn.add_css_class('flat');
         refreshBtn.connect('clicked', () => this.refresh());
         extGroup.set_header_suffix(refreshBtn);
         this.page.add(extGroup);
 
         this._extRow = new Adw.ActionRow({
-            title: 'Attivazione del programma',
-            subtitle: "Controlla la gestione dei canali Bluetooth e l'audio condiviso automatico",
+            subtitle: _('Controls Bluetooth channel management and automatic shared audio'),
         });
         this._extRow.add_prefix(Gtk.Image.new_from_icon_name('bluetooth-active-symbolic'));
 
         const extBtns = new Gtk.Box({spacing: 8, valign: Gtk.Align.CENTER});
-        this._scanBtn = new Gtk.Button({
-            label: 'Cerca BT',
-            valign: Gtk.Align.CENTER,
-            tooltip_text: `Avvia scansione Bluetooth intelligente per ${SCAN_SECONDS} secondi`,
-        });
+        this._scanBtn = new Gtk.Button({valign: Gtk.Align.CENTER});
         this._scanBtn.connect('clicked', () => this._onScan().catch(logError));
         extBtns.append(this._scanBtn);
 
@@ -126,7 +135,7 @@ class BlueHubPanel {
         extGroup.add(this._antennaRow);
 
         // --- Ripartizione canali e due riquadri [ − / + ] ---
-        this._radioGroup = new Adw.PreferencesGroup({title: '📡 Ripartizione Canali Bluetooth'});
+        this._radioGroup = new Adw.PreferencesGroup();
         this.page.add(this._radioGroup);
 
         this._radioRow = new Adw.ActionRow({use_markup: false});
@@ -135,8 +144,8 @@ class BlueHubPanel {
         this._radioGroup.add(this._capHintRow);
 
         const cards = new Gtk.Box({spacing: 16, homogeneous: true, margin_top: 12, margin_bottom: 8});
-        this._gpCard = this._makeQuotaCard('🎮 Gamepad', 'Connessi ora: 0', d => this._onChangeQuota('gamepad', d));
-        this._auCard = this._makeQuotaCard('🎧 Cuffie / Casse', 'Connesse ora: 0', d => this._onChangeQuota('audio', d));
+        this._gpCard = this._makeQuotaCard(d => this._onChangeQuota('gamepad', d));
+        this._auCard = this._makeQuotaCard(d => this._onChangeQuota('audio', d));
         cards.append(this._gpCard.box);
         cards.append(this._auCard.box);
         this._radioGroup.add(cards);
@@ -149,10 +158,27 @@ class BlueHubPanel {
         this._systemGroup = new Adw.PreferencesGroup();
         this.page.add(this._systemGroup);
 
+        this._applyStaticTexts();
+    }
+
+    // Testi fissi: chiamata alla costruzione e di nuovo dopo il caricamento delle traduzioni
+    _applyStaticTexts() {
+        this._extGroup.set_title(_('⚙️ BlueHub Extension'));
+        this._refreshBtn.set_tooltip_text(_('Refresh adapters, channels and devices'));
+        this._extRow.set_title(_('Enable BlueHub'));
+        this._scanBtn.set_label(this._scanning ? _('Searching...') : _('Search BT'));
+        this._scanBtn.set_tooltip_text(_('Start a smart Bluetooth scan for {seconds} seconds', {seconds: SCAN_SECONDS}));
+        this._radioGroup.set_title(_('📡 Bluetooth Channel Allocation'));
+        this._gpCard.titleLabel.set_label(_('🎮 Gamepads'));
+        this._auCard.titleLabel.set_label(_('🎧 Headphones / Speakers'));
+        this._gpCard.subLabel.set_label(_('Gamepads connected: {connected} / {quota}',
+            {connected: this._connGamepads, quota: this._quotaGamepads}));
+        this._auCard.subLabel.set_label(_('Headphones connected: {connected} / {quota}',
+            {connected: this._connAudio, quota: this._quotaHeadphones}));
         this._updateMasterStyle();
     }
 
-    _makeQuotaCard(title, subText, onChange) {
+    _makeQuotaCard(onChange) {
         const box = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL, spacing: 10, margin_start: 4, margin_end: 4});
         box.add_css_class('card');
         const inner = new Gtk.Box({
@@ -161,11 +187,11 @@ class BlueHubPanel {
         });
         box.append(inner);
 
-        const titleLabel = new Gtk.Label({label: title});
+        const titleLabel = new Gtk.Label();
         titleLabel.add_css_class('heading');
         inner.append(titleLabel);
 
-        const subLabel = new Gtk.Label({label: subText});
+        const subLabel = new Gtk.Label();
         subLabel.add_css_class('dim-label');
         inner.append(subLabel);
 
@@ -187,7 +213,7 @@ class BlueHubPanel {
         plusBtn.connect('clicked', () => onChange(+1));
         ctrl.append(plusBtn);
 
-        return {box, subLabel, valLabel, minusBtn, plusBtn};
+        return {box, titleLabel, subLabel, valLabel, minusBtn, plusBtn};
     }
 
     _rebuildAntennaSelector() {
@@ -203,22 +229,25 @@ class BlueHubPanel {
             const h0 = controllers[0];
             const a0 = adapters[h0] ?? {activeLinks: 0, freeChannels: CH};
             this._antennaRow.set_title(
-                `Antenna rilevata: ${h0} (Interna • ${a0.activeLinks}/${CH} usati, ${a0.freeChannels} liberi)`);
+                _('Adapter detected: {hci} (Internal • {used}/{total} used, {free} free)',
+                    {hci: h0, used: a0.activeLinks, total: CH, free: a0.freeChannels}));
             this._antennaRow.set_subtitle(
-                `Multi-Antenna pronto: se inserisci una chiavetta BT USB (hci1) avrai ${2 * CH} canali con smistamento automatico.`);
+                _('Multi-adapter ready: plug in a USB Bluetooth dongle (hci1) to get {channels} channels with automatic distribution.',
+                    {channels: 2 * CH}));
             return;
         }
 
         const perAnt = controllers.map(h => {
             const a = adapters[h] ?? {};
-            return `${h} (${a.busKind ?? 'BT'}): ${a.activeLinks ?? 0}/${CH} usati`;
+            return _('{hci} ({bus}): {used}/{total} used', {hci: h, bus: _(a.busKind ?? 'BT'), used: a.activeLinks ?? 0, total: CH});
         });
         this._antennaRow.set_title(
-            `Multi-Antenna Attivo (${controllers.length} ricevitori = ${controllers.length * CH} canali): ${perAnt.join(' • ')}`);
+            _('Multi-adapter active ({count} adapters = {channels} channels): {list}',
+                {count: controllers.length, channels: controllers.length * CH, list: perAnt.join(' • ')}));
         this._antennaRow.set_subtitle(
-            `Scansione e accoppiamento ('Cerca BT'): Auto sceglie l'antenna più libera (${bestHci})`);
+            _("Scan and pairing ('Search BT'): Auto picks the least busy adapter ({hci})", {hci: bestHci}));
 
-        const options = [['auto', `Auto (${bestHci})`], ...controllers.map(h => [h, h])];
+        const options = [['auto', _('Auto ({hci})', {hci: bestHci})], ...controllers.map(h => [h, h])];
         if (!options.some(([k]) => k === this._preferredScanHci)) {
             this._preferredScanHci = 'auto';
         }
@@ -242,7 +271,7 @@ class BlueHubPanel {
         }
         this._preferredScanHci = key;
         Core.updateConfig({preferred_scan_hci: key}).catch(logError);
-        this._toast(`Antenna per nuovi accoppiamenti: ${key === 'auto' ? 'Automatica (la più scarica)' : key}`);
+        this._toast(_('Adapter for new pairings: {adapter}', {adapter: key === 'auto' ? _('Automatic (least busy)') : key}));
     }
 
     // ------------------------------------------------------------------
@@ -251,11 +280,11 @@ class BlueHubPanel {
 
     _updateMasterStyle() {
         if (this._enabled) {
-            this._masterBtn.set_label('🟢 Attivo');
-            this._extRow.set_subtitle('🟢 Estensione attiva — Gestione canali e audio condiviso in funzione');
+            this._masterBtn.set_label(_('🟢 On'));
+            this._extRow.set_subtitle(_('🟢 BlueHub on — channel management and shared audio running'));
         } else {
-            this._masterBtn.set_label('⚪ Disattivato');
-            this._extRow.set_subtitle("⚪ Estensione disattivata — Premi 'Disattivato' per riattivarla");
+            this._masterBtn.set_label(_('⚪ Off'));
+            this._extRow.set_subtitle(_("⚪ BlueHub off — press 'Off' to turn it back on"));
         }
         for (const w of [this._antennaRow, this._radioGroup, this._gamepadGroup, this._audioGroup]) {
             w.set_sensitive(this._enabled);
@@ -266,7 +295,7 @@ class BlueHubPanel {
 
     _onMasterToggle() {
         this._enabled = this._masterBtn.get_active();
-        this._toast(this._enabled ? 'BlueHub Attivo' : 'BlueHub Disattivato');
+        this._toast(this._enabled ? _('BlueHub on') : _('BlueHub off'));
         // Prima salva, poi applica l'audio e ridisegna (l'aggiornamento rilegge la configurazione)
         Core.updateConfig({enabled: this._enabled}).then(() => this.refresh()).catch(logError);
     }
@@ -314,8 +343,10 @@ class BlueHubPanel {
 
         this._gpCard.valLabel.set_label(String(this._quotaGamepads));
         this._auCard.valLabel.set_label(String(this._quotaHeadphones));
-        this._gpCard.subLabel.set_label(`Connessi ora: ${this._connGamepads} / ${this._quotaGamepads}`);
-        this._auCard.subLabel.set_label(`Connesse ora: ${this._connAudio} / ${this._quotaHeadphones}`);
+        this._gpCard.subLabel.set_label(_('Gamepads connected: {connected} / {quota}',
+            {connected: this._connGamepads, quota: this._quotaGamepads}));
+        this._auCard.subLabel.set_label(_('Headphones connected: {connected} / {quota}',
+            {connected: this._connAudio, quota: this._quotaHeadphones}));
 
         this._gpCard.minusBtn.set_sensitive(this._enabled && this._quotaGamepads > this._connGamepads);
         this._gpCard.plusBtn.set_sensitive(this._enabled && !capReached);
@@ -324,13 +355,17 @@ class BlueHubPanel {
 
         if (capReached) {
             this._capHintRow.set_title(
-                `🔒 Tutti i ${this._usablePool} canali disponibili sono assegnati (${this._quotaGamepads} Gamepad + ${this._quotaHeadphones} Cuffie)`);
+                _('🔒 All {pool} available channels are assigned ({gamepads} gamepads + {headphones} headphones)',
+                    {pool: this._usablePool, gamepads: this._quotaGamepads, headphones: this._quotaHeadphones}));
             this._capHintRow.set_subtitle(
-                "Zero canali rimasti. Per spostare un canale sull'altro riquadro, premi prima [ − ] su quello che ha i canali.");
+                _('No channels left. To move a channel to the other box, first press [ − ] on the one that has it.'));
         } else {
             this._capHintRow.set_title(
-                `🟢 Hai ancora ${unassigned} ${unassigned === 1 ? 'canale disponibile' : 'canali disponibili'} da assegnare (${allocated}/${this._usablePool} assegnati)`);
-            this._capHintRow.set_subtitle('Puoi metterli tutti su Gamepad, tutti su Cuffie, o dividerli come preferisci.');
+                unassigned === 1
+                    ? _('🟢 You still have 1 channel to assign ({assigned}/{pool} assigned)', {assigned: allocated, pool: this._usablePool})
+                    : _('🟢 You still have {free} channels to assign ({assigned}/{pool} assigned)',
+                        {free: unassigned, assigned: allocated, pool: this._usablePool}));
+            this._capHintRow.set_subtitle(_('You can put them all on gamepads, all on headphones, or split them as you like.'));
         }
 
         this._rebuildDeviceLists();
@@ -401,14 +436,16 @@ class BlueHubPanel {
         this._usablePool = Math.max(0, hw.totalChannels - reserved);
         this._clampQuotas();
 
-        const antLabel = `${hw.numControllers} ${hw.numControllers === 1 ? 'antenna' : 'antenne'}`;
-        this._radioGroup.set_description(
-            `${hw.totalChannels} Canali Totali (${antLabel}) − ${reserved} già occupati = ${this._usablePool} canali liberi da assegnare`);
+        const antLabel = hw.numControllers === 1 ? _('1 adapter') : _('{count} adapters', {count: hw.numControllers});
+        this._radioGroup.set_description(GLib.markup_escape_text(
+            _('{total} total channels ({adapters}) − {reserved} already in use = {pool} free channels to assign',
+                {total: hw.totalChannels, adapters: antLabel, reserved, pool: this._usablePool}), -1));
 
         const sysDesc = connSystem.length ? ` (${connSystem.map(d => d.name).join(', ')})` : '';
         this._radioRow.set_title(
-            `${hw.totalChannels} Canali Totali − ${reserved} occupati da periferiche${sysDesc} = ${this._usablePool} Canali Disponibili`);
-        this._radioRow.set_subtitle('Nessun canale è riservato in anticipo: puoi assegnare tutti i canali disponibili come vuoi.');
+            _('{total} total channels − {reserved} used by peripherals{devices} = {pool} available channels',
+                {total: hw.totalChannels, reserved, devices: sysDesc, pool: this._usablePool}));
+        this._radioRow.set_subtitle(_('No channel is reserved in advance: you can assign all available channels as you like.'));
 
         this._updateQuotasAndButtons();
     }
@@ -420,23 +457,32 @@ class BlueHubPanel {
             await Core.applySharedAudioState(false, this._lastBtSinks, c);
             await Core.unloadCombinedMics(c);
             this._lastBtSinks = null;
-            return '⚪ BlueHub Disattivato — Condivisione audio spenta';
+            return _('⚪ BlueHub off — shared audio stopped');
         }
 
-        const micMsg = await Core.syncBtMicrophones(this._micMacs, c);
+        const mics = await Core.syncBtMicrophones(this._micMacs, c);
+        let micMsg;
+        if (mics.length >= 2) {
+            micMsg = _(' • 🎙️ {count} Bluetooth mics joined ({names})', {count: mics.length, names: mics.map(m => m.desc).join(', ')});
+        } else if (mics.length === 1) {
+            micMsg = _(' • 🎙️ Bluetooth mic on: {name}', {name: mics[0].desc});
+        } else {
+            micMsg = _(' • 🔒 Headphones kept in HD stereo (Bluetooth mics off)');
+        }
         const audio = await Core.applySharedAudioState(true, this._lastBtSinks, c);
         this._lastBtSinks = audio.btSinks;
 
         const infos = audio.btSinkInfos;
         if (infos.length >= 2) {
-            return `🎶 Ascolto Condiviso AUTOMATICO su ${infos.length} cuffie (${infos.map(s => s.desc).join(', ')})${micMsg}`;
+            return _('🎶 AUTOMATIC shared listening on {count} headphones ({names}){mic}',
+                {count: infos.length, names: infos.map(s => s.desc).join(', '), mic: micMsg});
         }
         if (infos.length === 1) {
-            return `🎧 Audio su: ${infos[0].desc}${micMsg}`;
+            return _('🎧 Audio on: {name}{mic}', {name: infos[0].desc, mic: micMsg});
         }
         return audio.fallbackDesc
-            ? `🔊 Nessuna cuffia BT connessa — Audio attivo su: ${audio.fallbackDesc}`
-            : "🔊 Nessuna cuffia BT connessa — Audio sull'uscita scelta nel sistema";
+            ? _('🔊 No Bluetooth headphones connected — audio on: {name}', {name: audio.fallbackDesc})
+            : _('🔊 No Bluetooth headphones connected — audio on the output chosen in the system');
     }
 
     // ------------------------------------------------------------------
@@ -467,39 +513,44 @@ class BlueHubPanel {
 
         // 1. Gamepad
         this._gamepadGroup.set_title(
-            `🎮 Gamepad Bluetooth (Connessi: ${this._connGamepads} / Canali assegnati: ${this._quotaGamepads})`);
+            _('🎮 Bluetooth gamepads (connected: {connected} / channels assigned: {quota})',
+                {connected: this._connGamepads, quota: this._quotaGamepads}));
         this._gamepadGroup.set_description(this._quotaGamepads === 0 && this._connGamepads === 0
-            ? '0 canali assegnati ai Gamepad: premi [ + ] nel riquadro Gamepad per abilitare la connessione.'
-            : `Slot Gamepad liberi: ${Math.max(0, this._quotaGamepads - this._connGamepads)} su ${this._quotaGamepads} assegnati.`);
+            ? _('0 channels assigned to gamepads: press [ + ] in the Gamepads box to allow connections.')
+            : _('Free gamepad slots: {free} of {quota} assigned.',
+                {free: Math.max(0, this._quotaGamepads - this._connGamepads), quota: this._quotaGamepads}));
         this._fillGroup(this._gamepadGroup, this._gamepadRows, byCat('gamepad'), 'gamepad',
-            'Nessun Gamepad Bluetooth in memoria',
-            "Accendi il controller in modalità pairing e premi 'Cerca BT' in alto.");
+            _('No Bluetooth gamepads known'),
+            _("Put the controller in pairing mode and press 'Search BT' above."));
 
         // 2. Cuffie e casse (con audio condiviso e microfoni)
         this._audioGroup.set_title(
-            `🎧 Cuffie e Casse Bluetooth (Connesse: ${this._connAudio} / Canali assegnati: ${this._quotaHeadphones})`);
+            _('🎧 Bluetooth headphones and speakers (connected: {connected} / channels assigned: {quota})',
+                {connected: this._connAudio, quota: this._quotaHeadphones}));
         // La descrizione dei gruppi è markup: i nomi delle cuffie possono contenere & < >
         this._audioGroup.set_description(GLib.markup_escape_text(this._lastSharedMsg, -1));
         this._fillGroup(this._audioGroup, this._audioRows, byCat('audio'), 'audio',
-            'Nessuna cuffia o cassa Bluetooth in memoria',
-            "Usa 'Cerca BT' in alto per cercare nuovi dispositivi.");
+            _('No Bluetooth headphones or speakers known'),
+            _("Use 'Search BT' above to look for new devices."));
 
         // 3. Mouse, tastiere e altro (conferma prima di scollegare)
         const system = byCat('system');
         this._systemGroup.set_title(
-            `⌨️ Mouse, Tastiera e Altri Dispositivi (${system.filter(d => d.connected).length} connessi)`);
-        this._systemGroup.set_description(
-            "Protetti da disconnessione accidentale: se premi 'Disconnetti' ti verrà chiesta conferma.");
+            _('⌨️ Mouse, keyboard and other devices ({count} connected)', {count: system.filter(d => d.connected).length}));
+        this._systemGroup.set_description(GLib.markup_escape_text(
+            _("Protected from accidental disconnection: pressing 'Disconnect' asks for confirmation."), -1));
         this._fillGroup(this._systemGroup, this._systemRows, system, 'system', null, null);
     }
 
     _createBtRow(dev, category) {
         const hciTag = `📡 ${dev.knownHcis.length > 1 ? dev.knownHcis.join('/') : dev.hci}`;
-        const status = dev.connected ? `🟢 Connesso su ${dev.hci} (1 canale)` : `⚪ Non connesso (${hciTag})`;
+        const status = dev.connected
+            ? _('🟢 Connected on {hci} (1 channel)', {hci: dev.hci})
+            : _('⚪ Not connected ({adapters})', {adapters: hciTag});
         const battery = dev.battery ? ` • 🔋 ${dev.battery}` : '';
         const row = new Adw.ActionRow({
             title: dev.name,
-            subtitle: `${status} • ${dev.kindLabel}${battery}`,
+            subtitle: `${status} • ${_(dev.kindLabel)}${battery}`,
             use_markup: false,   // i nomi dei dispositivi possono contenere & < >
         });
         row.add_prefix(Gtk.Image.new_from_icon_name(dev.iconName));
@@ -510,11 +561,10 @@ class BlueHubPanel {
         if (category === 'audio' && dev.connected) {
             const micOn = this._micMacs.has(dev.mac) || dev.isMicActive;
             const micBtn = new Gtk.ToggleButton({
-                label: micOn ? '🎙️ Mic: ON (Voce)' : '🎙️ Mic: OFF (Audio HD)',
+                label: micOn ? _('🎙️ Mic: ON (voice)') : _('🎙️ Mic: OFF (HD audio)'),
                 valign: Gtk.Align.CENTER,
                 active: micOn,
-                tooltip_text: 'OFF = Cuffia bloccata in Alta Qualità Stereo (A2DP)\n' +
-                    'ON = Attiva il microfono integrato di questa cuffia Bluetooth (HFP)',
+                tooltip_text: _('OFF = headphones kept in high-quality stereo (A2DP)\nON = turns on the built-in microphone of these Bluetooth headphones (HFP)'),
             });
             micBtn.connect('toggled', () => this._onToggleMic(micBtn, dev));
             suffix.append(micBtn);
@@ -522,23 +572,23 @@ class BlueHubPanel {
 
         const btn = new Gtk.Button({valign: Gtk.Align.CENTER});
         if (dev.connected) {
-            btn.set_label('Disconnetti');
+            btn.set_label(_('Disconnect'));
             btn.add_css_class('destructive-action');
         } else if (dev.adapterFree <= 0) {
-            btn.set_label(`Antenna ${dev.hci} piena (${CH}/${CH})`);
+            btn.set_label(_('Adapter {hci} full ({total}/{total})', {hci: dev.hci, total: CH}));
             btn.set_sensitive(false);
         } else if (category === 'gamepad' || category === 'audio') {
             const isGp = category === 'gamepad';
             const hasSlot = this._enabled && this._freeHwChannels > 0 &&
                 (isGp ? this._connGamepads < this._quotaGamepads : this._connAudio < this._quotaHeadphones);
-            btn.set_label(hasSlot ? 'Connetti' : `Bloccato (Dai +1 a ${isGp ? 'Gamepad' : 'Cuffie'})`);
+            btn.set_label(hasSlot ? _('Connect') : isGp ? _('Locked (give +1 to Gamepads)') : _('Locked (give +1 to Headphones)'));
             btn.set_sensitive(hasSlot);
             if (hasSlot) {
                 btn.add_css_class('suggested-action');
             }
         } else {
             const hasSlot = this._freeHwChannels > 0;
-            btn.set_label(hasSlot ? 'Connetti' : 'Canali pieni');
+            btn.set_label(hasSlot ? _('Connect') : _('Channels full'));
             btn.set_sensitive(hasSlot);
             if (hasSlot) {
                 btn.add_css_class('suggested-action');
@@ -558,7 +608,9 @@ class BlueHubPanel {
         } else {
             this._micMacs.delete(dev.mac);
         }
-        this._toast(`${dev.name}: ${wantMic ? 'Microfono BT attivato' : 'Audio Stereo HD ripristinato (Mic spento)'}`);
+        this._toast(wantMic
+            ? _('{device}: Bluetooth microphone on', {device: dev.name})
+            : _('{device}: HD stereo audio restored (mic off)', {device: dev.name}));
         Core.updateConfig({mic_enabled_macs: [...this._micMacs].sort()})
             .then(() => this.refresh()).catch(logError);
     }
@@ -575,7 +627,7 @@ class BlueHubPanel {
             } else {
                 dialog = new Adw.MessageDialog({heading, body, transient_for: this._window, modal: true});
             }
-            dialog.add_response('cancel', 'Annulla');
+            dialog.add_response('cancel', _('Cancel'));
             dialog.add_response('ok', okLabel);
             dialog.set_response_appearance('ok', Adw.ResponseAppearance.DESTRUCTIVE);
             dialog.set_default_response('cancel');
@@ -592,11 +644,10 @@ class BlueHubPanel {
     async _onDeviceButton(btn, dev, category) {
         if (dev.connected && category === 'system') {
             const ok = await this._confirm(
-                `Scollegare ${dev.name}?`,
-                `Stai per disconnettere '${dev.name}' dall'antenna ${dev.hci}.\n` +
-                'Se è il tuo mouse o la tua tastiera principale potresti rimanere senza controlli! ' +
-                'Sei sicuro di voler procedere?',
-                'Sì, disconnetti');
+                _('Disconnect {device}?', {device: dev.name}),
+                _("You are about to disconnect '{device}' from adapter {hci}.\nIf it is your main mouse or keyboard you could lose control! Do you want to continue?",
+                    {device: dev.name, hci: dev.hci}),
+                _('Yes, disconnect'));
             if (!ok || !this._alive) {
                 return;
             }
@@ -604,8 +655,10 @@ class BlueHubPanel {
 
         const wasConnected = dev.connected;
         btn.set_sensitive(false);
-        btn.set_label('Attendere...');
-        this._toast(`${wasConnected ? 'Disconnessione da' : 'Connessione a'} ${dev.name} (antenna ${dev.hci})...`);
+        btn.set_label(_('Please wait...'));
+        this._toast(wasConnected
+            ? _('Disconnecting {device} (adapter {hci})...', {device: dev.name, hci: dev.hci})
+            : _('Connecting {device} (adapter {hci})...', {device: dev.name, hci: dev.hci}));
 
         await Core.setDeviceConnected(dev, !wasConnected, this._cancellable);
         if (!this._alive) {
@@ -628,7 +681,7 @@ class BlueHubPanel {
         }
         this._scanning = true;
         this._scanBtn.set_sensitive(false);
-        this._scanBtn.set_label('Ricerca...');
+        this._scanBtn.set_label(_('Searching...'));
 
         const {adapters, bestHci} = this._hw;
         let target = this._preferredScanHci === 'auto' ? bestHci : this._preferredScanHci;
@@ -636,9 +689,10 @@ class BlueHubPanel {
             target = bestHci;   // antenna scelta non più presente
         }
         if (Object.keys(adapters).length > 1) {
-            this._toast(`Scansione Multi-Antenna su ${target} (${adapters[target]?.freeChannels ?? CH}/${CH} canali liberi) per ${SCAN_SECONDS}s...`);
+            this._toast(_('Multi-adapter scan on {hci} ({free}/{total} free channels) for {seconds}s...',
+                {hci: target, free: adapters[target]?.freeChannels ?? CH, total: CH, seconds: SCAN_SECONDS}));
         } else {
-            this._toast(`Scansione Bluetooth attiva per ${SCAN_SECONDS} secondi...`);
+            this._toast(_('Bluetooth scan running for {seconds} seconds...', {seconds: SCAN_SECONDS}));
         }
 
         try {
@@ -650,8 +704,8 @@ class BlueHubPanel {
             return;
         }
         this._scanBtn.set_sensitive(this._enabled);
-        this._scanBtn.set_label('Cerca BT');
-        this._toast(`Scansione completata su ${target}!`);
+        this._scanBtn.set_label(_('Search BT'));
+        this._toast(_('Scan finished on {hci}!', {hci: target}));
         this.refresh();
     }
 }

@@ -23,6 +23,14 @@ non più usata). Dal 04/11/2026 l'installazione si fa da qui con
 **Alla fine di ogni modifica importante fare sempre la revisione con la skill
 code-review** (richiesta di Michele, 04/11/2026).
 
+## Traduzioni (dal 04/11/2026)
+Testi del codice in **inglese**, passati a `_()` di `bluehub-i18n.js`; l'italiano è
+nella tabella `IT` dello stesso file, che è anche l'elenco completo delle frasi.
+**Ogni frase nuova va aggiunta alla tabella `IT`** (altrimenti in italiano resta
+inglese e non arriva ai file degli utenti). Le altre lingue le traducono gli
+utenti in `~/.config/bluehub/translations/<lingua>.json`: il pannello aggiunge in
+fondo le frasi nuove senza toccare quelle tradotte. Documentato nel README.
+
 ## Obiettivo: pubblicare su extensions.gnome.org
 Cose da sistemare prima (vedi `00_INDICE.md`):
 1. ~~`bluehub.py` dentro l'estensione, aperto con percorso relativo (`this.path`)~~ fatto

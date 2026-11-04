@@ -1,6 +1,6 @@
 {
   "name": "BlueHub",
-  "description": "BlueHub — Gestione connessioni Bluetooth multiple (2+ Gamepad, 2+ Cuffie/Casse) e Audio Condiviso selettivo per GNOME.",
+  "description": "Manage several Bluetooth devices at once on GNOME: share channels between gamepads and headphones, play the same audio on 2+ headphones, turn on headphone microphones and search on multiple Bluetooth adapters. English and Italian included; other languages can be translated by users (see the project page).",
   "uuid": "bluehub@bria-bria.github.io",
   "url": "https://github.com/bria-bria/bluehub",
   "shell-version": [

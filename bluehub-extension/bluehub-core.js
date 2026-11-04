@@ -55,7 +55,7 @@ export async function loadConfig() {
     try {
         return await readConfigStrict();
     } catch (e) {
-        logBlueHubError(`Configurazione non leggibile (${CONFIG_FILE}), uso i valori predefiniti: ${e}`);
+        logBlueHubError(`Config file ${CONFIG_FILE} not readable, using defaults: ${e}`);
         return {...DEFAULT_CONFIG};
     }
 }
@@ -69,7 +69,7 @@ async function saveConfig(cfg) {
         await write();
     } catch (e) {
         if (!e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.NOT_FOUND)) {
-            logBlueHubError(`Errore salvataggio config: ${e}`);
+            logBlueHubError(`Cannot save config: ${e}`);
             return;
         }
         // Manca la cartella ~/.config: la crea e riprova
@@ -77,7 +77,7 @@ async function saveConfig(cfg) {
             await file.get_parent().make_directory_async(GLib.PRIORITY_DEFAULT, null);
             await write();
         } catch (e2) {
-            logBlueHubError(`Errore salvataggio config: ${e2}`);
+            logBlueHubError(`Cannot save config: ${e2}`);
         }
     }
 }
@@ -94,7 +94,7 @@ export function updateConfig(changes) {
         try {
             cfg = await readConfigStrict();
         } catch (e) {
-            logBlueHubError(`Configurazione non valida, modifica non salvata (correggi ${CONFIG_FILE}): ${e}`);
+            logBlueHubError(`Config file ${CONFIG_FILE} not valid, change not saved (please fix it): ${e}`);
             return {...DEFAULT_CONFIG, ...changes};
         }
         Object.assign(cfg, changes);
@@ -125,7 +125,7 @@ export async function runCommand(argv, {cancellable = null, input = null, timeou
         }
         proc = Gio.Subprocess.new(argv, flags);
     } catch (e) {
-        logBlueHubError(`Impossibile eseguire ${argv[0]}: ${e}`);
+        logBlueHubError(`Cannot run ${argv[0]}: ${e}`);
         return '';
     }
 
@@ -141,7 +141,7 @@ export async function runCommand(argv, {cancellable = null, input = null, timeou
         if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED)) {
             proc.force_exit();   // annullato: non lascia il comando in esecuzione
         } else {
-            logBlueHubError(`Errore comando ${argv.join(' ')}: ${e}`);
+            logBlueHubError(`Command failed ${argv.join(' ')}: ${e}`);
         }
         return '';
     } finally {
@@ -220,7 +220,7 @@ function detectBusType(hci) {
             return 'USB';
         }
     } catch (_e) {}
-    return 'Interna';
+    return 'Internal';
 }
 
 async function getManagedObjects(cancellable) {
@@ -275,7 +275,7 @@ function computeHardwareStats(managed) {
             mac: meta.mac ?? '',
             alias: meta.alias ?? hci,
             powered: meta.powered ?? true,
-            busKind: idx > 0 ? detectBusType(hci) : 'Interna',
+            busKind: idx > 0 ? detectBusType(hci) : 'Internal',
             activeLinks: used,
             freeChannels: Math.max(0, CHANNELS_PER_ADAPTER - used),
         };
@@ -326,20 +326,20 @@ function classifyDevice(name, iconType) {
         return {iconName: 'input-gaming-symbolic', kindLabel: 'Gamepad / Controller', category: 'gamepad'};
     }
     if (isAudio) {
-        return {iconName: 'audio-headphones-symbolic', kindLabel: 'Cuffie / Cassa Audio', category: 'audio'};
+        return {iconName: 'audio-headphones-symbolic', kindLabel: 'Headphones / Speaker', category: 'audio'};
     }
     if (isInput) {
         const keyboard = name.toLowerCase().includes('keyboard') || iconType.includes('keyboard');
         return {
             iconName: keyboard ? 'input-keyboard-symbolic' : 'input-mouse-symbolic',
-            kindLabel: 'Mouse / Tastiera (Conferma richiesta per scollegare)',
+            kindLabel: 'Mouse / Keyboard (confirmation required to disconnect)',
             category: 'system',
         };
     }
     if (iconType.includes('phone')) {
         return {iconName: 'phone-symbolic', kindLabel: 'Smartphone', category: 'system'};
     }
-    return {iconName: 'bluetooth-active-symbolic', kindLabel: 'Dispositivo Bluetooth', category: 'system'};
+    return {iconName: 'bluetooth-active-symbolic', kindLabel: 'Bluetooth device', category: 'system'};
 }
 
 // Per ogni MAC: profili PipeWire (A2DP = stereo HD, HFP = microfono attivo)
@@ -582,7 +582,7 @@ export async function applySharedAudioState(enabled, prevBtSinks, cancellable = 
                 'pactl', 'load-module', 'module-combine-sink',
                 `sink_name=${COMBINED_SINK_NAME}`,
                 wantedSlaves,
-                'sink_properties=device.description="BlueHub_Audio_Condiviso_Automatico"',
+                'sink_properties=device.description="BlueHub_Shared_Audio"',
             ], {cancellable});
             await runCommand(['pactl', 'set-default-sink', COMBINED_SINK_NAME], {cancellable});
         }
@@ -614,7 +614,8 @@ export async function unloadCombinedMics(cancellable = null) {
 
 // Microfoni delle cuffie BT: di default le cuffie restano in A2DP (stereo HD);
 // quelle indicate in micMacs passano in HFP (microfono attivo). Con 2+ microfoni
-// BT attivi li unisce in un unico microfono. Restituisce il testo di stato.
+// BT attivi li unisce in un unico microfono. Restituisce i microfoni BT attivi
+// [{name, desc}] (il testo di stato lo compone il pannello, tradotto).
 export async function syncBtMicrophones(micMacs, cancellable = null) {
     await unloadCombinedMics(cancellable);
 
@@ -635,7 +636,7 @@ export async function syncBtMicrophones(micMacs, cancellable = null) {
     if (sources.length >= 2) {
         await runCommand(['pactl', 'load-module', 'module-null-sink',
             `sink_name=${COMBINED_MIC_SINK}`,
-            'sink_properties=device.description="BlueHub_Mix_Microfoni_BT"'], {cancellable});
+            'sink_properties=device.description="BlueHub_BT_Mic_Mix"'], {cancellable});
         for (const src of sources) {
             await runCommand(['pactl', 'load-module', 'module-loopback',
                 `source=${src.name}`, `sink=${COMBINED_MIC_SINK}`, 'latency_msec=20'], {cancellable});
@@ -643,13 +644,10 @@ export async function syncBtMicrophones(micMacs, cancellable = null) {
         await runCommand(['pactl', 'load-module', 'module-remap-source',
             `master=${COMBINED_MIC_SINK}.monitor`,
             `source_name=${COMBINED_MIC_SOURCE}`,
-            'source_properties=device.description="BlueHub_Microfoni_BT_Condivisi"'], {cancellable});
+            'source_properties=device.description="BlueHub_Shared_BT_Mics"'], {cancellable});
         await runCommand(['pactl', 'set-default-source', COMBINED_MIC_SOURCE], {cancellable});
-        return ` • 🎙️ ${sources.length} Microfoni BT uniti (${sources.map(s => s.desc).join(', ')})`;
-    }
-    if (sources.length === 1) {
+    } else if (sources.length === 1) {
         await runCommand(['pactl', 'set-default-source', sources[0].name], {cancellable});
-        return ` • 🎙️ Mic BT attivo: ${sources[0].desc}`;
     }
-    return ' • 🔒 Cuffie protette in Stereo HD (Mic BT spenti)';
+    return sources;
 }
