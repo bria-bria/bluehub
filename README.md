@@ -19,9 +19,15 @@ headphone microphones and multiple Bluetooth adapters.
 ## Smart Calendar Hub
 
 If [Smart Calendar Hub](https://bria-bria.github.io/smart-calendar-hub/) is installed,
-*Open BlueHub channel panel* in the Quick Settings menu opens the hub's side panel on
-a BlueHub page (status, on/off, link to the full panel). BlueHub adds no icon to the
-top bar or to the hub's tray. Without the hub it opens the BlueHub window as usual.
+BlueHub lives entirely inside the hub's side panel:
+*Open BlueHub channel panel* in the Quick Settings menu opens the hub on BlueHub.
+
+- **In the panel column**: on/off, *Search BT*, adapters, channel allocation with [ + ] / [ − ].
+- **In a card beside the panel** (like the hub's calendar): gamepads, headphones with their
+  microphones, mouse and keyboard.
+
+BlueHub adds no icon to the top bar or to the hub's tray. The Quick Settings button stays
+as a shortcut. Without the hub, the same panel opens in its own window.
 
 ## Requirements
 

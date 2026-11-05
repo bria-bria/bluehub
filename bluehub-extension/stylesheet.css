@@ -1,0 +1,96 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+/* SPDX-FileCopyrightText: 2026 bria-bria */
+/* Pannello BlueHub dentro Smart Calendar Hub (bluehub-hub-panel.js).
+   Colori neutri trasparenti: vanno bene sia con il tema chiaro sia con lo scuro. */
+
+.bluehub-page {
+    spacing: 6px;
+    padding: 4px 6px 8px 6px;
+}
+
+.bluehub-body {
+    spacing: 6px;
+}
+
+.bluehub-title {
+    font-weight: bold;
+    margin-top: 10px;
+}
+
+.bluehub-section {
+    font-weight: bold;
+}
+
+.bluehub-dim {
+    font-size: 0.9em;
+    color: rgba(127, 127, 127, 1);
+}
+
+.bluehub-warning {
+    font-size: 0.9em;
+    color: #e5a50a;
+}
+
+.bluehub-toast {
+    padding: 6px 10px;
+    border-radius: 9px;
+    background-color: rgba(127, 127, 127, 0.18);
+}
+
+.bluehub-buttons {
+    spacing: 6px;
+}
+
+.bluehub-button {
+    padding: 6px 10px;
+    border-radius: 9px;
+}
+
+.bluehub-suggested {
+    background-color: -st-accent-color;
+    color: -st-accent-fg-color;
+}
+
+.bluehub-destructive {
+    color: #e01b24;
+}
+
+.bluehub-button:insensitive {
+    color: rgba(127, 127, 127, 0.7);
+}
+
+.bluehub-cards {
+    spacing: 8px;
+}
+
+.bluehub-card {
+    padding: 8px;
+    spacing: 4px;
+    border-radius: 12px;
+    background-color: rgba(127, 127, 127, 0.12);
+}
+
+.bluehub-quota {
+    spacing: 12px;
+    margin-top: 4px;
+}
+
+.bluehub-value {
+    font-size: 1.6em;
+    font-weight: bold;
+    min-width: 1.6em;
+    text-align: center;
+}
+
+.bluehub-row {
+    spacing: 4px;
+    padding: 8px;
+    border-radius: 12px;
+    background-color: rgba(127, 127, 127, 0.08);
+}
+
+.bluehub-row-icon {
+    icon-size: 16px;
+    margin-right: 8px;
+    margin-top: 2px;
+}

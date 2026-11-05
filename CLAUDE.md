@@ -32,12 +32,16 @@ utenti in `~/.config/bluehub/translations/<lingua>.json`: il pannello aggiunge i
 fondo le frasi nuove senza toccare quelle tradotte. Documentato nel README.
 
 ## Smart Calendar Hub (dal 05/11/2026)
-Integrazione senza icona: "Apri pannello" chiama
-`Main.extensionManager.lookup('smart-calendar-hub@bria-bria.github.io')?.stateObj?.showExternalPage({id, title, buildPage, keepStyle})`
-(API aggiunta apposta nell'hub dalla sessione "Smart Calendar Hub refactor"); se
-restituisce false apre la finestra Preferenze. Pulsante del menu rapido sempre a
-una colonna, icona `icons/bluehub-symbolic.svg` ("hub a raggi"). Lo zip va fatto
-con `--extra-source=icons`.
+Con l'hub installato BlueHub sta **tutto dentro l'hub** (decisione di Michele):
+"Apri pannello" chiama `stateObj.showExternalPage({id, title, buildPage, buildSidePage, keepStyle})`
+di `smart-calendar-hub@bria-bria.github.io` (API creata apposta dalla sessione "Smart Calendar
+Hub refactor"; `externalPageFeatures` contiene `'side'` se c'è il riquadro affiancato).
+Colonna dell'hub: attivazione, Cerca BT, antenne, canali + / −; riquadro affiancato (come il
+calendario): liste dispositivi. Senza l'hub: la finestra Preferenze.
+Architettura: `bluehub-panel-model.js` = stato/regole/testi senza grafica; due facce:
+`prefs.js` (GTK) e `bluehub-hub-panel.js` (St). **Le modifiche alla logica vanno nel
+modello**, non nelle facce. Pulsante nel menu rapido = scorciatoia, sempre a una colonna,
+icona `icons/bluehub-symbolic.svg` ("hub a raggi"). Nessuna icona in barra o nel vassoio.
 
 ## Obiettivo: pubblicare su extensions.gnome.org
 Cose da sistemare prima (vedi `00_INDICE.md`):

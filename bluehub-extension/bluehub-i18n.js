@@ -56,7 +56,6 @@ const IT = {
     '⚙️ BlueHub Extension': '⚙️ Scheda Estensione BlueHub',
     'Refresh adapters, channels and devices': 'Aggiorna antenne, canali e dispositivi',
     'Enable BlueHub': 'Attivazione del programma',
-    'Controls Bluetooth channel management and automatic shared audio': "Controlla la gestione dei canali Bluetooth e l'audio condiviso automatico",
     'Search BT': 'Cerca BT',
     'Start a smart Bluetooth scan for {seconds} seconds': 'Avvia scansione Bluetooth intelligente per {seconds} secondi',
     '📡 Bluetooth Channel Allocation': '📡 Ripartizione Canali Bluetooth',

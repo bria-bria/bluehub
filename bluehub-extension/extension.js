@@ -6,7 +6,6 @@
 // altrimenti la finestra Preferenze (prefs.js).
 // La logica (audio condiviso, configurazione) sta in bluehub-core.js.
 
-import Clutter from 'gi://Clutter';
 import GObject from 'gi://GObject';
 import Gio from 'gi://Gio';
 
@@ -15,9 +14,9 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import {QuickMenuToggle, SystemIndicator} from 'resource:///org/gnome/shell/ui/quickSettings.js';
 
-import St from 'gi://St';
 
 import * as Core from './bluehub-core.js';
+import {HubPanel} from './bluehub-hub-panel.js';
 import {_, loadUserTranslations, unloadUserTranslations} from './bluehub-i18n.js';
 
 const SMART_CALENDAR_HUB_UUID = 'smart-calendar-hub@bria-bria.github.io';
@@ -124,82 +123,48 @@ class BlueHubQuickToggle extends QuickMenuToggle {
         this._statusItem = null;
         this._openItem?.destroy();
         this._openItem = null;
-        // La pagina nell'hub usa questo pulsante: va chiusa con lui
-        this._hubPage?.destroy();
-        this._hubPage = null;
-        this._hubSync = null;
+        // Il pannello nell'hub va chiuso insieme al pulsante
+        this._hubPanel?.mainPage?.destroy();
+        this._hubPanel = null;
         super.destroy();
     }
 
-    // "Apri pannello": con Smart Calendar Hub apre il suo pannello laterale sulla
-    // pagina di BlueHub; senza l'hub (o se non riesce) apre la finestra BlueHub
+    // "Apri pannello": con Smart Calendar Hub apre il suo pannello laterale con
+    // BlueHub completo (colonna dell'hub + riquadro affiancato per le liste);
+    // senza l'hub (o se non riesce) apre la finestra BlueHub
     _openPanel() {
+        const api = smartCalendarHub();
         let shown = false;
-        try {
-            shown = smartCalendarHub()?.showExternalPage({
-                id: this._extension.uuid,
-                title: 'BlueHub',
-                buildPage: () => this._buildHubPage(),
-                keepStyle: false,
-            }) === true;
-        } catch (e) {
-            Core.logBlueHubError(`Smart Calendar Hub: ${e}`);
+        if (api) {
+            const withSide = Array.isArray(api.externalPageFeatures) && api.externalPageFeatures.includes('side');
+            try {
+                shown = api.showExternalPage({
+                    id: this._extension.uuid,
+                    title: 'BlueHub',
+                    buildPage: () => {
+                        this._hubPanel = new HubPanel({
+                            withSidePage: withSide,
+                            onOpenWindow: () => this._extension.openPreferences(),
+                            onClosed: () => {
+                                this._hubPanel = null;
+                                this._refreshState();   // lo stato può essere cambiato nell'hub
+                            },
+                        });
+                        return this._hubPanel.mainPage;
+                    },
+                    buildSidePage: withSide ? () => this._hubPanel?.sidePage ?? null : null,
+                    keepStyle: false,
+                }) === true;
+                if (shown) {
+                    this._hubPanel?.checkSidePage();
+                }
+            } catch (e) {
+                Core.logBlueHubError(`Smart Calendar Hub: ${e}`);
+            }
         }
         if (!shown) {
             this._extension.openPreferences();
         }
-    }
-
-    // Pagina di BlueHub dentro Smart Calendar Hub: stato, attiva/disattiva e
-    // pulsante per la finestra completa. L'hub la distrugge quando si chiude.
-    _buildHubPage() {
-        const page = new St.BoxLayout({x_expand: true, style_class: 'bluehub-hub-page'});
-        // GNOME 48+: 'orientation'; GNOME 45-47: 'vertical'
-        if ('orientation' in page) {
-            page.orientation = Clutter.Orientation.VERTICAL;
-        } else {
-            page.vertical = true;
-        }
-        this._hubPage = page;
-        // Controlli figli della pagina: distrutti (con i loro segnali) insieme a lei
-        const status = new St.Label({x_expand: true});
-        status.clutter_text.line_wrap = true;
-        page.add_child(status);
-
-        const toggleBtn = new St.Button({style_class: 'button', can_focus: true, x_expand: true});
-        toggleBtn.connect('clicked', () => {
-            if (!this._configLoaded) {
-                return;
-            }
-            this.checked = !this.checked;
-            Core.updateConfig({enabled: this.checked})
-                .then(() => this._refreshState())
-                .catch(e => Core.logBlueHubError(`Errore salvataggio: ${e}`));
-            this._syncHubPage();
-        });
-        page.add_child(toggleBtn);
-
-        const panelBtn = new St.Button({style_class: 'button', can_focus: true, x_expand: true,
-            label: _('Open the full BlueHub panel')});
-        panelBtn.connect('clicked', () => this._extension.openPreferences());
-        page.add_child(panelBtn);
-
-        // Aggiorna i testi della pagina finché è aperta
-        this._hubSync = () => {
-            status.text = this._statusText ?? _('📡 Reading channels...');
-            toggleBtn.label = this.checked ? _('🟢 On') : _('⚪ Off');
-        };
-        page.connect('destroy', () => {
-            this._hubPage = null;
-            this._hubSync = null;
-        });
-        this._syncHubPage();
-        this._refreshState();
-        return page;
-    }
-
-    _syncHubPage() {
-        this._hubSync?.();
     }
 
     // Avvia un aggiornamento senza bloccare GNOME
@@ -251,9 +216,7 @@ class BlueHubQuickToggle extends QuickMenuToggle {
                     statusText = _('🟢 {used}/{total} channels in use ({free} free)',
                         {used: hw.activeLinks, total: hw.totalChannels, free: hw.freeChannels});
                 }
-                this._statusText = statusText;
                 this._statusItem.label.text = statusText;
-                this._syncHubPage();
             } while (this._refreshAgain);
         } finally {
             this._refreshing = false;
