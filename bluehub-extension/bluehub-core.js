@@ -612,6 +612,70 @@ export async function unloadCombinedMics(cancellable = null) {
     }
 }
 
+// ------------------------------------------------------------------
+// Lettori multimediali (MPRIS): cambiando profilo (microfono acceso/spento)
+// molte cuffie mandano da sole "pausa", come per una telefonata. BlueHub
+// annota i lettori che suonavano e, se dopo il cambio sono in pausa, li riavvia.
+// ------------------------------------------------------------------
+
+const MPRIS_PREFIX = 'org.mpris.MediaPlayer2.';
+// playerctld rimanda i comandi al lettore attivo: si userebbe due volte lo stesso
+const MPRIS_SKIP = new Set(['org.mpris.MediaPlayer2.playerctld']);
+
+async function playbackStatus(name, cancellable) {
+    try {
+        const reply = await Gio.DBus.session.call(name, '/org/mpris/MediaPlayer2',
+            'org.freedesktop.DBus.Properties', 'Get',
+            new GLib.Variant('(ss)', ['org.mpris.MediaPlayer2.Player', 'PlaybackStatus']),
+            new GLib.VariantType('(v)'), Gio.DBusCallFlags.NONE, 1500, cancellable);
+        return reply.recursiveUnpack()[0];
+    } catch (_e) {
+        return null;
+    }
+}
+
+async function playingPlayers(cancellable) {
+    let names = [];
+    try {
+        const reply = await Gio.DBus.session.call('org.freedesktop.DBus', '/org/freedesktop/DBus',
+            'org.freedesktop.DBus', 'ListNames', null, new GLib.VariantType('(as)'),
+            Gio.DBusCallFlags.NONE, 1500, cancellable);
+        names = reply.recursiveUnpack()[0].filter(n => n.startsWith(MPRIS_PREFIX) && !MPRIS_SKIP.has(n));
+    } catch (_e) {
+        return [];
+    }
+    const playing = [];
+    for (const name of names) {
+        if (await playbackStatus(name, cancellable) === 'Playing') {
+            playing.push(name);
+        }
+    }
+    return playing;
+}
+
+// Riavvia i lettori che suonavano e che le cuffie hanno messo in pausa
+// (controllo dopo 1,5 e dopo 3 secondi: la pausa può arrivare in ritardo)
+async function resumePausedPlayers(players, cancellable) {
+    const resumed = new Set();
+    for (const wait of [1500, 1500]) {
+        await sleep(wait, cancellable);
+        if (cancellable?.is_cancelled()) {
+            return;
+        }
+        for (const name of players) {
+            if (await playbackStatus(name, cancellable) !== 'Paused') {
+                continue;
+            }
+            try {
+                await Gio.DBus.session.call(name, '/org/mpris/MediaPlayer2', 'org.mpris.MediaPlayer2.Player',
+                    'Play', null, null, Gio.DBusCallFlags.NONE, 1500, cancellable);
+                resumed.add(name);
+            } catch (_e) {}
+        }
+    }
+    return resumed.size;
+}
+
 // Microfoni delle cuffie BT: di default le cuffie restano in A2DP (stereo HD);
 // quelle indicate in micMacs passano in HFP (microfono attivo). Con 2+ microfoni
 // BT attivi li unisce in un unico microfono. Restituisce i microfoni BT attivi
@@ -620,12 +684,25 @@ export async function syncBtMicrophones(micMacs, cancellable = null) {
     await unloadCombinedMics(cancellable);
 
     const cardMap = await getBtCardsProfileMap(cancellable);
+    const changes = [];
     for (const [mac, card] of Object.entries(cardMap)) {
         const wantMic = micMacs.has(mac);
         if (wantMic && card.bestHfp && !card.isMicActive) {
-            await runCommand(['pactl', 'set-card-profile', card.cardName, card.bestHfp], {cancellable});
+            changes.push([card.cardName, card.bestHfp]);
         } else if (!wantMic && card.isMicActive && card.bestA2dp) {
-            await runCommand(['pactl', 'set-card-profile', card.cardName, card.bestA2dp], {cancellable});
+            changes.push([card.cardName, card.bestA2dp]);
+        }
+    }
+    if (changes.length > 0) {
+        // Prima del cambio di profilo: chi sta suonando (per riavviarlo se le cuffie lo mettono in pausa)
+        const playing = await playingPlayers(cancellable);
+        for (const [cardName, profile] of changes) {
+            await runCommand(['pactl', 'set-card-profile', cardName, profile], {cancellable});
+        }
+        if (playing.length > 0) {
+            // in sottofondo, anche se nel frattempo il pannello viene chiuso
+            resumePausedPlayers(playing, null)
+                .catch(e => logBlueHubError(`Resume players: ${e}`));
         }
     }
 
