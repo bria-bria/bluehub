@@ -4,7 +4,7 @@
 // "Modello" del pannello BlueHub: stato, regole e testi, senza grafica.
 // Lo usano due "facce":
 // - prefs.js: la finestra BlueHub (GTK/libadwaita), quando Smart Calendar Hub non c'è
-// - bluehub-hub-panel.js: il pannello dentro Smart Calendar Hub (St, GNOME Shell)
+// - bluehub-hub-kit.js: il pannello dentro Smart Calendar Hub (kit di pezzi dell'hub)
 // Ogni cambiamento chiama onChange(); la faccia ridisegna leggendo view().
 
 import Gio from 'gi://Gio';
@@ -55,14 +55,6 @@ export class PanelModel {
 
     get alive() {
         return !this._cancellable.is_cancelled();
-    }
-
-    get enabled() {
-        return this._enabled;
-    }
-
-    get scanning() {
-        return this._scanning;
     }
 
     _changed() {

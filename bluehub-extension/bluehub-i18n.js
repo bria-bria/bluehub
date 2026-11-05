@@ -36,7 +36,6 @@ const IT = {
     'Bluetooth channels & shared audio': 'Gestione Canali Bluetooth & Audio Condiviso',
     '📡 Reading channels...': '📡 Lettura canali...',
     '🚀 Open BlueHub channel panel (+ / −)': '🚀 Apri Pannello Canali BlueHub (+ / −)',
-    'Open the full BlueHub panel': 'Apri il pannello completo di BlueHub',
     'Off': 'Disattivato',
     '⚪ BlueHub off': '⚪ Estensione disattivata',
     'Shared ({count} headphones)': 'Condiviso ({count} cuffie)',
@@ -186,7 +185,7 @@ let userTable = null;
 let cachedLanguage = null;
 
 // Codice della lingua del sistema, es. 'it', 'en', 'fr'
-export function systemLanguage() {
+function systemLanguage() {
     for (const name of GLib.get_language_names()) {
         if (name !== 'C' && name !== 'POSIX') {
             return name.split(/[_.@]/)[0].toLowerCase();

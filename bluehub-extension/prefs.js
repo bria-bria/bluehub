@@ -3,7 +3,7 @@
 
 // Finestra BlueHub (Preferenze dell'estensione), usata quando Smart Calendar Hub
 // non è installato. Stato, regole e testi stanno in bluehub-panel-model.js,
-// condiviso con il pannello dentro l'hub (bluehub-hub-panel.js): qui solo il disegno
+// condiviso con il pannello dentro l'hub (bluehub-hub-kit.js): qui solo il disegno
 // con GTK/libadwaita.
 
 import Adw from 'gi://Adw';

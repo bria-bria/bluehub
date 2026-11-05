@@ -16,7 +16,6 @@ import {QuickMenuToggle, SystemIndicator} from 'resource:///org/gnome/shell/ui/q
 
 
 import * as Core from './bluehub-core.js';
-import {HubPanel} from './bluehub-hub-panel.js';
 import {KitHubPanel} from './bluehub-hub-kit.js';
 import {_, loadUserTranslations, unloadUserTranslations} from './bluehub-i18n.js';
 
@@ -149,12 +148,17 @@ class BlueHubQuickToggle extends QuickMenuToggle {
             const features = Array.isArray(api.externalPageFeatures) ? api.externalPageFeatures : [];
             const withSide = features.includes('side');
             const kit = features.includes('kit') ? api.pageKit : null;
+            if (!kit) {
+                // hub senza il kit delle pagine (versione vecchia): finestra BlueHub
+                this._extension.openPreferences();
+                return;
+            }
             const onClosed = () => {
                 this._hubPanel = null;
                 this._refreshState();   // lo stato può essere cambiato nell'hub
             };
             // Intestazione del riquadro disegnata dall'hub: titolo e due pulsanti tondi
-            const header = kit && withSide && features.includes('side-header') ? {
+            const header = withSide && features.includes('side-header') ? {
                 sideTitle: _('Bluetooth devices'),
                 sideActions: [
                     {icon: 'view-refresh-symbolic', label: _('Refresh'), onClick: () => this._hubPanel?.refresh()},
@@ -168,20 +172,14 @@ class BlueHubQuickToggle extends QuickMenuToggle {
                     // Il pannello si crea solo quando l'hub lo chiede (se BlueHub è già
                     // aperto nell'hub, non lo chiede e resta quello che c'è)
                     buildPage: () => {
-                        this._hubPanel = kit
-                            ? new KitHubPanel({
-                                kit, icon: this._icon, withSidePage: withSide, onClosed,
-                                // messaggi di esito e contatore: solo se l'hub li offre
-                                notify: features.includes('message')
-                                    ? text => api.showPageMessage(this._extension.uuid, text) : null,
-                                setCount: withSide && features.includes('side-count')
-                                    ? n => api.setSideCount(this._extension.uuid, n) : null,
-                            })
-                            : new HubPanel({
-                                withSidePage: withSide,
-                                onOpenWindow: () => this._extension.openPreferences(),
-                                onClosed,
-                            });
+                        this._hubPanel = new KitHubPanel({
+                            kit, icon: this._icon, withSidePage: withSide, onClosed,
+                            // messaggi di esito e contatore: solo se l'hub li offre
+                            notify: features.includes('message')
+                                ? text => api.showPageMessage(this._extension.uuid, text) : null,
+                            setCount: withSide && features.includes('side-count')
+                                ? n => api.setSideCount(this._extension.uuid, n) : null,
+                        });
                         return this._hubPanel.mainPage;
                     },
                     buildSidePage: withSide ? () => this._hubPanel?.sidePage ?? null : null,
@@ -227,7 +225,7 @@ class BlueHubQuickToggle extends QuickMenuToggle {
                 this._enableItem?.setToggleState(isEnabled);
                 this._configLoaded = true;
 
-                const hw = Core.getHardwareChannelStats();
+                const hw = await Core.getHardwareChannelStats();
                 const audio = await Core.applySharedAudioState(isEnabled, this._lastBtSinks, this._cancellable);
 
                 // Estensione disattivata mentre i comandi giravano: non toccare più il pulsante
@@ -328,6 +326,7 @@ export default class BlueHubExtension extends Extension {
             this._indicator.destroy();
             this._indicator = null;
         }
+        Core.cancelBackgroundWork();
         unloadUserTranslations();
     }
 }

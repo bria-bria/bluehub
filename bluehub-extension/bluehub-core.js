@@ -14,8 +14,11 @@ Gio._promisify(Gio.DBusConnection.prototype, 'call');
 Gio._promisify(Gio.File.prototype, 'load_contents_async');
 Gio._promisify(Gio.File.prototype, 'replace_contents_async');
 Gio._promisify(Gio.File.prototype, 'make_directory_async');
+Gio._promisify(Gio.File.prototype, 'enumerate_children_async');
+Gio._promisify(Gio.FileEnumerator.prototype, 'next_files_async');
+Gio._promisify(Gio.FileEnumerator.prototype, 'close_async');
 
-export const COMBINED_SINK_NAME = 'bluehub_combined_sink';
+const COMBINED_SINK_NAME = 'bluehub_combined_sink';
 const COMBINED_MIC_SINK = 'bluehub_combined_mic_mix';
 const COMBINED_MIC_SOURCE = 'bluehub_combined_mic';
 // Nomi usati dalle versioni precedenti: vengono comunque riconosciuti e rimossi
@@ -112,7 +115,7 @@ export function updateConfig(changes) {
 
 // Esegue un comando senza bloccare: restituisce lo stdout (o '' se fallisce).
 // Dopo timeoutMs il comando viene terminato.
-export async function runCommand(argv, {cancellable = null, input = null, timeoutMs = 8000} = {}) {
+async function runCommand(argv, {cancellable = null, input = null, timeoutMs = 8000} = {}) {
     // Già annullato (estensione disattivata, pannello chiuso): non avvia nulla
     if (cancellable?.is_cancelled()) {
         return '';
@@ -182,25 +185,30 @@ function sleep(ms, cancellable = null) {
 // Antenne Bluetooth (hci0, hci1...) e canali
 // ------------------------------------------------------------------
 
-function listSysBluetooth() {
-    const names = [];
+// Voci di /sys/class/bluetooth (hci0, hci0:1...) con la destinazione del
+// collegamento, che contiene "usb" per le chiavette USB. Asincrona.
+async function listSysBluetooth() {
+    const entries = new Map();
     try {
         const dir = Gio.File.new_for_path('/sys/class/bluetooth');
-        const enumerator = dir.enumerate_children('standard::name', Gio.FileQueryInfoFlags.NONE, null);
-        let info;
-        while ((info = enumerator.next_file(null)) !== null) {
-            names.push(info.get_name());
+        const enumerator = await dir.enumerate_children_async('standard::name,standard::symlink-target',
+            Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS, GLib.PRIORITY_DEFAULT, null);
+        let infos;
+        while ((infos = await enumerator.next_files_async(32, GLib.PRIORITY_DEFAULT, null)).length > 0) {
+            for (const info of infos) {
+                entries.set(info.get_name(), info.get_symlink_target() ?? '');
+            }
         }
-        enumerator.close(null);
+        await enumerator.close_async(GLib.PRIORITY_DEFAULT, null);
     } catch (_e) {}
-    return names;
+    return entries;
 }
 
 // Conteggio veloce dei canali (per il menu rapido): legge solo /sys.
-export function getHardwareChannelStats() {
+export async function getHardwareChannelStats() {
     let hosts = 0;
     let links = 0;
-    for (const name of listSysBluetooth()) {
+    for (const name of (await listSysBluetooth()).keys()) {
         if (/^hci\d+$/.test(name)) {
             hosts++;
         } else if (/^hci\d+:\d+$/.test(name)) {
@@ -212,16 +220,6 @@ export function getHardwareChannelStats() {
     return {totalChannels, activeLinks: links, freeChannels};
 }
 
-function detectBusType(hci) {
-    try {
-        // /sys/class/bluetooth/hciN è un collegamento verso il dispositivo reale
-        const target = GLib.file_read_link(`/sys/class/bluetooth/${hci}`);
-        if (target.toLowerCase().includes('usb')) {
-            return 'USB';
-        }
-    } catch (_e) {}
-    return 'Internal';
-}
 
 async function getManagedObjects(cancellable) {
     try {
@@ -233,8 +231,8 @@ async function getManagedObjects(cancellable) {
     }
 }
 
-function computeHardwareStats(managed) {
-    const entries = listSysBluetooth();
+function computeHardwareStats(managed, sysEntries) {
+    const entries = [...sysEntries.keys()];
     let hosts = entries.filter(n => /^hci\d+$/.test(n)).sort();
     const linksByHci = {};
     for (const h of hosts) {
@@ -275,7 +273,8 @@ function computeHardwareStats(managed) {
             mac: meta.mac ?? '',
             alias: meta.alias ?? hci,
             powered: meta.powered ?? true,
-            busKind: idx > 0 ? detectBusType(hci) : 'Internal',
+            // /sys/class/bluetooth/hciN punta al dispositivo reale: "usb" = chiavetta USB
+            busKind: idx > 0 && (sysEntries.get(hci) ?? '').toLowerCase().includes('usb') ? 'USB' : 'Internal',
             activeLinks: used,
             freeChannels: Math.max(0, CHANNELS_PER_ADAPTER - used),
         };
@@ -433,11 +432,12 @@ function buildDeviceList(managed, hw, cardMap) {
 
 // Stato completo per il pannello: antenne, canali e dispositivi
 export async function readBluetoothState(cancellable = null) {
-    const [managed, cardMap] = await Promise.all([
+    const [managed, cardMap, sysEntries] = await Promise.all([
         getManagedObjects(cancellable),
         getBtCardsProfileMap(cancellable),
+        listSysBluetooth(),
     ]);
-    const hw = computeHardwareStats(managed);
+    const hw = computeHardwareStats(managed, sysEntries);
     return {hw, devices: buildDeviceList(managed, hw, cardMap)};
 }
 
@@ -618,6 +618,16 @@ export async function unloadCombinedMics(cancellable = null) {
 // annota i lettori che suonavano e, se dopo il cambio sono in pausa, li riavvia.
 // ------------------------------------------------------------------
 
+// Lavori in sottofondo ancora in corso (riavvio dei lettori): annullati in disable()
+const backgroundWork = new Set();
+
+export function cancelBackgroundWork() {
+    for (const cancellable of backgroundWork) {
+        cancellable.cancel();
+    }
+    backgroundWork.clear();
+}
+
 const MPRIS_PREFIX = 'org.mpris.MediaPlayer2.';
 // playerctld rimanda i comandi al lettore attivo: si userebbe due volte lo stesso
 const MPRIS_SKIP = new Set(['org.mpris.MediaPlayer2.playerctld']);
@@ -700,9 +710,13 @@ export async function syncBtMicrophones(micMacs, cancellable = null) {
             await runCommand(['pactl', 'set-card-profile', cardName, profile], {cancellable});
         }
         if (playing.length > 0) {
-            // in sottofondo, anche se nel frattempo il pannello viene chiuso
-            resumePausedPlayers(playing, null)
-                .catch(e => logBlueHubError(`Resume players: ${e}`));
+            // in sottofondo, anche se nel frattempo il pannello viene chiuso;
+            // si ferma con cancelBackgroundWork() (disable dell'estensione)
+            const resumeCancellable = new Gio.Cancellable();
+            backgroundWork.add(resumeCancellable);
+            resumePausedPlayers(playing, resumeCancellable)
+                .catch(e => logBlueHubError(`Resume players: ${e}`))
+                .finally(() => backgroundWork.delete(resumeCancellable));
         }
     }
 
