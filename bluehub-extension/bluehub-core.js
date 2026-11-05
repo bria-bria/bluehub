@@ -706,8 +706,16 @@ export async function syncBtMicrophones(micMacs, cancellable = null) {
         }
     }
 
+    // Microfoni attivi = cuffie in modalità voce (HFP) dopo i cambi di profilo.
+    // Alcune cuffie (codec "duplex", es. Nothing Ear) espongono un ingresso anche
+    // in modalità audio HD: quello NON conta come microfono acceso.
+    const voiceMacs = new Set(Object.entries(changes.length > 0 ? await getBtCardsProfileMap(cancellable) : cardMap)
+        .filter(([, card]) => card.isMicActive)
+        .map(([mac]) => mac));
+    const sourceMac = s => (s.properties?.['api.bluez5.address'] ??
+        (s.name ?? '').replace(/^bluez_input\./, '').slice(0, 17).replaceAll('_', ':')).toUpperCase();
     const sources = (await listNodes('sources', cancellable) ?? [])
-        .filter(s => (s.name ?? '').startsWith('bluez_input.'))
+        .filter(s => (s.name ?? '').startsWith('bluez_input.') && voiceMacs.has(sourceMac(s)))
         .map(s => ({name: s.name, desc: nodeDesc(s)}));
 
     if (sources.length >= 2) {
