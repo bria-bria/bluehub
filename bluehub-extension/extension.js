@@ -45,7 +45,8 @@ class BlueHubQuickToggle extends QuickMenuToggle {
             title: 'BlueHub',
             subtitle: _('Loading...'),
             gicon: icon,
-            toggleMode: true,
+            // il clic apre il pannello; il colore (checked) mostra se BlueHub è attivo
+            toggleMode: false,
             checked: false,
         });
 
@@ -62,6 +63,20 @@ class BlueHubQuickToggle extends QuickMenuToggle {
         this._statusItem = new PopupMenu.PopupMenuItem(_('📡 Reading channels...'), {reactive: false});
         this.menu.addMenuItem(this._statusItem);
 
+        // Attiva/disattiva dalla freccetta del pulsante
+        this._enableItem = new PopupMenu.PopupSwitchMenuItem(_('Enable BlueHub'), false);
+        this._enableItem.connect('toggled', (_item, on) => {
+            // Configurazione non ancora letta: niente salvataggio, si rilegge lo stato vero
+            if (!this._configLoaded) {
+                this._refreshState();
+                return;
+            }
+            Core.updateConfig({enabled: on})
+                .then(() => this._refreshState())
+                .catch(e => Core.logBlueHubError(`Errore salvataggio: ${e}`));
+        });
+        this.menu.addMenuItem(this._enableItem);
+
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
         this._openItem = new PopupMenu.PopupMenuItem('');
@@ -74,18 +89,10 @@ class BlueHubQuickToggle extends QuickMenuToggle {
         this.menu.addMenuItem(this._openItem);
         this._applyStaticTexts();
 
-        // Quando si clicca sul tasto principale: attiva/disattiva BlueHub
-        // (prima salva, poi aggiorna: così l'aggiornamento legge il valore nuovo)
+        // Clic sul pulsante: apre subito il pannello BlueHub (nell'hub o la finestra)
         this.connect('clicked', () => {
-            // Configurazione non ancora letta: lo stato mostrato non è quello vero,
-            // quindi il clic non salva nulla e si rilegge lo stato reale
-            if (!this._configLoaded) {
-                this._refreshState();
-                return;
-            }
-            Core.updateConfig({enabled: this.checked})
-                .then(() => this._refreshState())
-                .catch(e => Core.logBlueHubError(`Errore salvataggio: ${e}`));
+            Main.panel.statusArea.quickSettings.menu.close();
+            this._openPanel();
         });
 
         this._menuOpenId = this.menu.connect('open-state-changed', (_menu, isOpen) => {
@@ -124,6 +131,8 @@ class BlueHubQuickToggle extends QuickMenuToggle {
         this._statusItem = null;
         this._openItem?.destroy();
         this._openItem = null;
+        this._enableItem?.destroy();
+        this._enableItem = null;
         // Il pannello nell'hub va chiuso insieme al pulsante
         this._hubPanel?.mainPage?.destroy();
         this._hubPanel = null;
@@ -215,6 +224,7 @@ class BlueHubQuickToggle extends QuickMenuToggle {
                 if (this.checked !== isEnabled) {
                     this.checked = isEnabled;
                 }
+                this._enableItem?.setToggleState(isEnabled);
                 this._configLoaded = true;
 
                 const hw = Core.getHardwareChannelStats();
