@@ -2,9 +2,11 @@
 // SPDX-FileCopyrightText: 2026 bria-bria
 
 // Pulsante BlueHub nel menu rapido di GNOME: attiva/disattiva BlueHub, mostra i
-// canali Bluetooth in uso e apre il pannello (finestra Preferenze, prefs.js).
+// canali Bluetooth in uso e apre il pannello: dentro Smart Calendar Hub se c'è,
+// altrimenti la finestra Preferenze (prefs.js).
 // La logica (audio condiviso, configurazione) sta in bluehub-core.js.
 
+import Clutter from 'gi://Clutter';
 import GObject from 'gi://GObject';
 import Gio from 'gi://Gio';
 
@@ -13,18 +15,36 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import {QuickMenuToggle, SystemIndicator} from 'resource:///org/gnome/shell/ui/quickSettings.js';
 
+import St from 'gi://St';
+
 import * as Core from './bluehub-core.js';
 import {_, loadUserTranslations, unloadUserTranslations} from './bluehub-i18n.js';
+
+const SMART_CALENDAR_HUB_UUID = 'smart-calendar-hub@bria-bria.github.io';
+
+// Icona "hub a raggi" di BlueHub (icons/bluehub-symbolic.svg)
+function blueHubIcon(extension) {
+    return new Gio.FileIcon({file: extension.dir.get_child('icons').get_child('bluehub-symbolic.svg')});
+}
+
+// Smart Calendar Hub, se è installato e attivo e offre la "via preferenziale"
+// per mostrare la pagina di un'altra estensione senza icona; altrimenti null
+function smartCalendarHub() {
+    const hub = Main.extensionManager.lookup(SMART_CALENDAR_HUB_UUID);
+    const api = hub?.stateObj;
+    return typeof api?.showExternalPage === 'function' ? api : null;
+}
 
 const BlueHubQuickToggle = GObject.registerClass(
 class BlueHubQuickToggle extends QuickMenuToggle {
     _init(extension) {
         // Lo stato vero (attivo/disattivato) arriva dalla configurazione, letta
         // in modo asincrono dal primo aggiornamento qui sotto
+        const icon = blueHubIcon(extension);
         super._init({
             title: 'BlueHub',
             subtitle: _('Loading...'),
-            iconName: 'bluetooth-active-symbolic',
+            gicon: icon,
             toggleMode: true,
             checked: false,
         });
@@ -45,10 +65,11 @@ class BlueHubQuickToggle extends QuickMenuToggle {
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
         this._openItem = new PopupMenu.PopupMenuItem('');
+        this._extension = extension;
+        this._icon = icon;   // creata una volta, riusata nell'intestazione
         this._openItem.connect('activate', () => {
             Main.panel.statusArea.quickSettings.menu.close();
-            // Il pannello è la finestra Preferenze dell'estensione (prefs.js)
-            extension.openPreferences();
+            this._openPanel();
         });
         this.menu.addMenuItem(this._openItem);
         this._applyStaticTexts();
@@ -87,7 +108,7 @@ class BlueHubQuickToggle extends QuickMenuToggle {
 
     // Testi che non cambiano con lo stato (intestazione e voce del pannello)
     _applyStaticTexts() {
-        this.menu.setHeader('bluetooth-active-symbolic', 'BlueHub', _('Bluetooth channels & shared audio'));
+        this.menu.setHeader(this._icon, 'BlueHub', _('Bluetooth channels & shared audio'));
         this._openItem.label.text = _('🚀 Open BlueHub channel panel (+ / −)');
     }
 
@@ -103,7 +124,82 @@ class BlueHubQuickToggle extends QuickMenuToggle {
         this._statusItem = null;
         this._openItem?.destroy();
         this._openItem = null;
+        // La pagina nell'hub usa questo pulsante: va chiusa con lui
+        this._hubPage?.destroy();
+        this._hubPage = null;
+        this._hubSync = null;
         super.destroy();
+    }
+
+    // "Apri pannello": con Smart Calendar Hub apre il suo pannello laterale sulla
+    // pagina di BlueHub; senza l'hub (o se non riesce) apre la finestra BlueHub
+    _openPanel() {
+        let shown = false;
+        try {
+            shown = smartCalendarHub()?.showExternalPage({
+                id: this._extension.uuid,
+                title: 'BlueHub',
+                buildPage: () => this._buildHubPage(),
+                keepStyle: false,
+            }) === true;
+        } catch (e) {
+            Core.logBlueHubError(`Smart Calendar Hub: ${e}`);
+        }
+        if (!shown) {
+            this._extension.openPreferences();
+        }
+    }
+
+    // Pagina di BlueHub dentro Smart Calendar Hub: stato, attiva/disattiva e
+    // pulsante per la finestra completa. L'hub la distrugge quando si chiude.
+    _buildHubPage() {
+        const page = new St.BoxLayout({x_expand: true, style_class: 'bluehub-hub-page'});
+        // GNOME 48+: 'orientation'; GNOME 45-47: 'vertical'
+        if ('orientation' in page) {
+            page.orientation = Clutter.Orientation.VERTICAL;
+        } else {
+            page.vertical = true;
+        }
+        this._hubPage = page;
+        // Controlli figli della pagina: distrutti (con i loro segnali) insieme a lei
+        const status = new St.Label({x_expand: true});
+        status.clutter_text.line_wrap = true;
+        page.add_child(status);
+
+        const toggleBtn = new St.Button({style_class: 'button', can_focus: true, x_expand: true});
+        toggleBtn.connect('clicked', () => {
+            if (!this._configLoaded) {
+                return;
+            }
+            this.checked = !this.checked;
+            Core.updateConfig({enabled: this.checked})
+                .then(() => this._refreshState())
+                .catch(e => Core.logBlueHubError(`Errore salvataggio: ${e}`));
+            this._syncHubPage();
+        });
+        page.add_child(toggleBtn);
+
+        const panelBtn = new St.Button({style_class: 'button', can_focus: true, x_expand: true,
+            label: _('Open the full BlueHub panel')});
+        panelBtn.connect('clicked', () => this._extension.openPreferences());
+        page.add_child(panelBtn);
+
+        // Aggiorna i testi della pagina finché è aperta
+        this._hubSync = () => {
+            status.text = this._statusText ?? _('📡 Reading channels...');
+            toggleBtn.label = this.checked ? _('🟢 On') : _('⚪ Off');
+        };
+        page.connect('destroy', () => {
+            this._hubPage = null;
+            this._hubSync = null;
+        });
+        this._syncHubPage();
+        this._refreshState();
+        return page;
+    }
+
+    _syncHubPage() {
+        this._hubSync?.();
     }
 
     // Avvia un aggiornamento senza bloccare GNOME
@@ -142,18 +238,22 @@ class BlueHubQuickToggle extends QuickMenuToggle {
                 this._lastBtSinks = audio.btSinks;
                 const btAudioCount = audio.count;
 
+                let statusText;
                 if (!isEnabled) {
                     this.subtitle = _('Off');
-                    this._statusItem.label.text = _('⚪ BlueHub off');
+                    statusText = _('⚪ BlueHub off');
                 } else if (btAudioCount >= 2) {
                     this.subtitle = _('Shared ({count} headphones)', {count: btAudioCount});
-                    this._statusItem.label.text = _('🟢 {used}/{total} channels used • 🎶 {count} headphones joined',
+                    statusText = _('🟢 {used}/{total} channels used • 🎶 {count} headphones joined',
                         {used: hw.activeLinks, total: hw.totalChannels, count: btAudioCount});
                 } else {
                     this.subtitle = _('{free}/{total} channels free', {free: hw.freeChannels, total: hw.totalChannels});
-                    this._statusItem.label.text = _('🟢 {used}/{total} channels in use ({free} free)',
+                    statusText = _('🟢 {used}/{total} channels in use ({free} free)',
                         {used: hw.activeLinks, total: hw.totalChannels, free: hw.freeChannels});
                 }
+                this._statusText = statusText;
+                this._statusItem.label.text = statusText;
+                this._syncHubPage();
             } while (this._refreshAgain);
         } finally {
             this._refreshing = false;
@@ -166,8 +266,7 @@ class BlueHubSystemIndicator extends SystemIndicator {
     _init(extension) {
         super._init();
 
-        // Nessuna seconda icona nella barra in alto (Opzione 3):
-        // solo il pulsante grande nel menu rapido di GNOME!
+        // Nessuna icona nella barra in alto: solo il pulsante nel menu rapido
         this._toggle = new BlueHubQuickToggle(extension);
         this.quickSettingsItems.push(this._toggle);
     }
@@ -177,91 +276,42 @@ export default class BlueHubExtension extends Extension {
     enable() {
         this._indicator = new BlueHubSystemIndicator(this);
         this._gridSignals = [];
-        this._childVisSignals = new Map();
 
         const qs = Main.panel.statusArea.quickSettings;
-        qs.addExternalIndicator(this._indicator, 2);
+        // Pulsante sempre piccolo (una colonna)
+        qs.addExternalIndicator(this._indicator);
 
+        // Tiene BlueHub in fondo ai pulsanti quando GNOME ne aggiunge altri
         const grid = qs.menu?._grid;
         if (grid) {
             this._gridSignals.push(
-                grid.connect('child-added', (_g, child) => {
-                    this._trackChild(child);
-                    this._updateGridPositionAndSpan();
-                }),
+                grid.connect('child-added', () => this._keepLast()),
                 grid.connect('child-removed', (_g, child) => {
                     // Quando GNOME si chiude smonta il menu rapido e distrugge il
                     // pulsante: da quel momento non va più usato ("already disposed")
                     if (this._indicator && child === this._indicator._toggle) {
                         this._indicator._toggle = null;
                     }
-                    this._untrackChild(child);
-                    this._updateGridPositionAndSpan();
                 })
             );
-            for (const child of grid.get_children()) {
-                this._trackChild(child);
-            }
         }
-
-        // Assicura che resti sempre ultimo e ricalcola se deve essere doppio (col-span 2) o singolo (col-span 1)
-        this._updateGridPositionAndSpan();
+        this._keepLast();
     }
 
-    _trackChild(child) {
-        if (!child || this._childVisSignals.has(child)) return;
-        const id = child.connect('notify::visible', () => {
-            this._updateGridPositionAndSpan();
-        });
-        this._childVisSignals.set(child, id);
-    }
-
-    _untrackChild(child) {
-        const id = this._childVisSignals.get(child);
-        if (id) {
-            try {
-                child.disconnect(id);
-            } catch (_e) {}
-            this._childVisSignals.delete(child);
-        }
-    }
-
-    _updateGridPositionAndSpan() {
+    // BlueHub ultimo tra i pulsanti (subito prima di "applicazioni in background")
+    _keepLast() {
         const qs = Main.panel.statusArea.quickSettings;
         const grid = qs?.menu?._grid;
         const toggle = this._indicator?._toggle;
-        if (!grid || !toggle || toggle.get_parent() !== grid) return;
-
-        // 1. Mantieni BlueHub SEMPRE ULTIMO tra i tasti (subito prima di "applicazioni in background")
+        if (!grid || !toggle || toggle.get_parent() !== grid) {
+            return;
+        }
         const bgAppsItem = qs._backgroundApps?.quickSettingsItems?.at(-1) ?? null;
         if (bgAppsItem && bgAppsItem.get_parent() === grid) {
             grid.set_child_below_sibling(toggle, bgAppsItem);
         } else {
             grid.set_child_above_sibling(toggle, null);
         }
-
-        // 2. Se BlueHub si trova da solo sull'ultima riga (numero pari di tasti a 1 colonna prima di lui),
-        //    diventa automaticamente TASTO DOPPIO GRANDE (column-span = 2); altrimenti 1 colonna!
-        const layout = grid.layout_manager;
-        let singleColCount = 0;
-        for (const child of grid.get_children()) {
-            if (child === toggle || child === bgAppsItem) continue;
-            if (!child.visible) continue;
-            let span = 1;
-            try {
-                span = layout.child_get_property(grid, child, 'column-span') || 1;
-            } catch (_e) {}
-            if (span === 1) {
-                singleColCount++;
-            } else {
-                singleColCount = 0;
-            }
-        }
-
-        const desiredSpan = (singleColCount % 2 === 0) ? 2 : 1;
-        try {
-            layout.child_set_property(grid, toggle, 'column-span', desiredSpan);
-        } catch (_e) {}
     }
 
     disable() {
@@ -275,15 +325,6 @@ export default class BlueHubExtension extends Extension {
             }
         }
         this._gridSignals = [];
-
-        if (this._childVisSignals) {
-            for (const [child, id] of this._childVisSignals.entries()) {
-                try {
-                    child.disconnect(id);
-                } catch (_e) {}
-            }
-            this._childVisSignals.clear();
-        }
 
         if (this._indicator) {
             this._indicator.quickSettingsItems.forEach(item => item.destroy());

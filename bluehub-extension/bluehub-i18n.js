@@ -36,6 +36,7 @@ const IT = {
     'Bluetooth channels & shared audio': 'Gestione Canali Bluetooth & Audio Condiviso',
     '📡 Reading channels...': '📡 Lettura canali...',
     '🚀 Open BlueHub channel panel (+ / −)': '🚀 Apri Pannello Canali BlueHub (+ / −)',
+    'Open the full BlueHub panel': 'Apri il pannello completo di BlueHub',
     'Off': 'Disattivato',
     '⚪ BlueHub off': '⚪ Estensione disattivata',
     'Shared ({count} headphones)': 'Condiviso ({count} cuffie)',

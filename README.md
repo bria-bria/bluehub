@@ -16,6 +16,13 @@ headphone microphones and multiple Bluetooth adapters.
   - confirmation before disconnecting your mouse or keyboard.
 - **Shared audio**: with 2 or more Bluetooth headphones connected, the same audio plays on all of them.
 
+## Smart Calendar Hub
+
+If [Smart Calendar Hub](https://bria-bria.github.io/smart-calendar-hub/) is installed,
+*Open BlueHub channel panel* in the Quick Settings menu opens the hub's side panel on
+a BlueHub page (status, on/off, link to the full panel). BlueHub adds no icon to the
+top bar or to the hub's tray. Without the hub it opens the BlueHub window as usual.
+
 ## Requirements
 
 - GNOME Shell 45 or later

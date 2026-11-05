@@ -63,6 +63,15 @@ for f in "${EXT_FILES[@]}"; do
         cp -f "$EXT_SRC/$f" "$EXT_DEST/$f"
     fi
 done
+# Icone (cartella icons/): fanno parte del pulsante nel menu rapido
+mkdir -p "$EXT_DEST/icons"
+for icon in "$EXT_SRC"/icons/*.svg; do
+    [[ -f "$icon" ]] || continue
+    if ! cmp -s "$icon" "$EXT_DEST/icons/$(basename "$icon")"; then
+        EXT_CHANGED=1
+        cp -f "$icon" "$EXT_DEST/icons/"
+    fi
+done
 # Il vecchio pannello Python non fa più parte dell'estensione
 rm -f -- "$EXT_DEST/bluehub.py"
 

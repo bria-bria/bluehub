@@ -4,6 +4,7 @@
 |---|---|
 | `bluehub-extension/extension.js` | Pulsante nel menu rapido di GNOME |
 | `bluehub-extension/prefs.js` | Pannello di controllo (finestra Preferenze): canali, Cerca BT, microfoni, audio condiviso |
+| `bluehub-extension/icons/bluehub-symbolic.svg` | Icona "hub a raggi" del pulsante nel menu rapido |
 | `bluehub-extension/bluehub-i18n.js` | Traduzioni: inglese di base, italiano incluso, file utente per le altre lingue |
 | `bluehub-extension/bluehub-core.js` | Logica comune: Bluetooth (D-Bus), audio (pactl), configurazione |
 | `bluehub-extension/metadata.json` | Nome, UUID, versioni GNOME supportate |
@@ -21,7 +22,7 @@
 - [x] Licenza GPL-2.0-or-later: file `LICENSE` + intestazioni SPDX (04/11/2026)
 - [x] Revisione code-review + correzione di 5 errori (04/11/2026)
 - [x] Pannello riscritto in GJS dentro `prefs.js` + `bluehub-core.js`; `bluehub.py` eliminato (04/11/2026)
-- [x] Pacchetto zip in `dist/` (04/11/2026): `gnome-extensions pack bluehub-extension --extra-source=bluehub-core.js --extra-source=bluehub-i18n.js --extra-source=../LICENSE --out-dir=dist --force`
+- [x] Pacchetto zip in `dist/` (04/11/2026): `gnome-extensions pack bluehub-extension --extra-source=bluehub-core.js --extra-source=bluehub-i18n.js --extra-source=icons --extra-source=../LICENSE --out-dir=dist --force`
 - [x] Su GitHub `bria-bria/bluehub`, email dei commit resa anonima; campo `url` in metadata.json (04/11/2026)
 - [x] Repository reso pubblico, `main` all'ultima versione (04/11/2026)
 - [x] Versione 1 caricata su extensions.gnome.org: estensione 11630 (04/11/2026)

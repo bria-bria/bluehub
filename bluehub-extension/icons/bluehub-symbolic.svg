@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: GPL-2.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 bria-bria -->
+<!-- BlueHub: "hub a raggi", un centro collegato a tre dispositivi. Solo forme piene (icona simbolica). -->
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <g fill="#2e3436">
+    <path fill-rule="evenodd" d="M8 5.6a3 3 0 1 0 0 6a3 3 0 1 0 0-6zm0 1.4a1.6 1.6 0 1 1 0 3.2a1.6 1.6 0 1 1 0-3.2z"/>
+    <path d="M7.3 3.6h1.4v2.2h-1.4z"/>
+    <path d="M5.97 10.92L5.15 9.78L2.29 11.83L3.11 12.97z"/>
+    <path d="M10.03 10.92L10.85 9.78L13.71 11.83L12.89 12.97z"/>
+    <circle cx="8" cy="2.4" r="1.5"/>
+    <circle cx="2.7" cy="12.4" r="1.5"/>
+    <circle cx="13.3" cy="12.4" r="1.5"/>
+  </g>
+</svg>

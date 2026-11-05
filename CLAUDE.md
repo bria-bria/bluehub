@@ -31,6 +31,14 @@ inglese e non arriva ai file degli utenti). Le altre lingue le traducono gli
 utenti in `~/.config/bluehub/translations/<lingua>.json`: il pannello aggiunge in
 fondo le frasi nuove senza toccare quelle tradotte. Documentato nel README.
 
+## Smart Calendar Hub (dal 05/11/2026)
+Integrazione senza icona: "Apri pannello" chiama
+`Main.extensionManager.lookup('smart-calendar-hub@bria-bria.github.io')?.stateObj?.showExternalPage({id, title, buildPage, keepStyle})`
+(API aggiunta apposta nell'hub dalla sessione "Smart Calendar Hub refactor"); se
+restituisce false apre la finestra Preferenze. Pulsante del menu rapido sempre a
+una colonna, icona `icons/bluehub-symbolic.svg` ("hub a raggi"). Lo zip va fatto
+con `--extra-source=icons`.
+
 ## Obiettivo: pubblicare su extensions.gnome.org
 Cose da sistemare prima (vedi `00_INDICE.md`):
 1. ~~`bluehub.py` dentro l'estensione, aperto con percorso relativo (`this.path`)~~ fatto
