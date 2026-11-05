@@ -17,6 +17,7 @@ import {QuickMenuToggle, SystemIndicator} from 'resource:///org/gnome/shell/ui/q
 
 import * as Core from './bluehub-core.js';
 import {HubPanel} from './bluehub-hub-panel.js';
+import {KitHubPanel} from './bluehub-hub-kit.js';
 import {_, loadUserTranslations, unloadUserTranslations} from './bluehub-i18n.js';
 
 const SMART_CALENDAR_HUB_UUID = 'smart-calendar-hub@bria-bria.github.io';
@@ -136,24 +137,40 @@ class BlueHubQuickToggle extends QuickMenuToggle {
         const api = smartCalendarHub();
         let shown = false;
         if (api) {
-            const withSide = Array.isArray(api.externalPageFeatures) && api.externalPageFeatures.includes('side');
+            const features = Array.isArray(api.externalPageFeatures) ? api.externalPageFeatures : [];
+            const withSide = features.includes('side');
+            const kit = features.includes('kit') ? api.pageKit : null;
+            const onClosed = () => {
+                this._hubPanel = null;
+                this._refreshState();   // lo stato può essere cambiato nell'hub
+            };
+            // Intestazione del riquadro disegnata dall'hub: titolo e due pulsanti tondi
+            const header = kit && withSide && features.includes('side-header') ? {
+                sideTitle: _('Bluetooth devices'),
+                sideActions: [
+                    {icon: 'view-refresh-symbolic', label: _('Refresh'), onClick: () => this._hubPanel?.refresh()},
+                    {icon: 'system-search-symbolic', label: _('Search BT'), onClick: () => this._hubPanel?.scan()},
+                ],
+            } : {};
             try {
                 shown = api.showExternalPage({
                     id: this._extension.uuid,
                     title: 'BlueHub',
+                    // Il pannello si crea solo quando l'hub lo chiede (se BlueHub è già
+                    // aperto nell'hub, non lo chiede e resta quello che c'è)
                     buildPage: () => {
-                        this._hubPanel = new HubPanel({
-                            withSidePage: withSide,
-                            onOpenWindow: () => this._extension.openPreferences(),
-                            onClosed: () => {
-                                this._hubPanel = null;
-                                this._refreshState();   // lo stato può essere cambiato nell'hub
-                            },
-                        });
+                        this._hubPanel = kit
+                            ? new KitHubPanel({kit, icon: this._icon, withSidePage: withSide, onClosed})
+                            : new HubPanel({
+                                withSidePage: withSide,
+                                onOpenWindow: () => this._extension.openPreferences(),
+                                onClosed,
+                            });
                         return this._hubPanel.mainPage;
                     },
                     buildSidePage: withSide ? () => this._hubPanel?.sidePage ?? null : null,
                     keepStyle: false,
+                    ...header,
                 }) === true;
                 if (shown) {
                     this._hubPanel?.checkSidePage();

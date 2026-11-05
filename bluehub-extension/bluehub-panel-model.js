@@ -25,6 +25,7 @@ export class PanelModel {
         this._refreshAgain = false;
         this._lastBtSinks = null;      // cuffie BT viste all'ultimo aggiornamento
         this._sharedMsg = '';
+        this._audioShort = '';         // stato audio in una riga (pannello nell'hub)
         this._scanning = false;
         this._busy = new Set();        // MAC dei dispositivi in connessione/disconnessione
 
@@ -141,6 +142,7 @@ export class PanelModel {
             await Core.applySharedAudioState(false, this._lastBtSinks, c);
             await Core.unloadCombinedMics(c);
             this._lastBtSinks = null;
+            this._audioShort = _('Off');
             return _('⚪ BlueHub off — shared audio stopped');
         }
 
@@ -157,6 +159,17 @@ export class PanelModel {
         this._lastBtSinks = audio.btSinks;
 
         const infos = audio.btSinkInfos;
+        const micShort = mics.length >= 2 ? _(' · {count} microphones joined', {count: mics.length})
+            : mics.length === 1 ? _(' · microphone on') : '';
+        if (infos.length >= 2) {
+            this._audioShort = _('On {count} headphones: {names}', {count: infos.length, names: infos.map(i => i.desc).join(', ')}) + micShort;
+        } else if (infos.length === 1) {
+            this._audioShort = _('On {name}', {name: infos[0].desc}) + micShort;
+        } else {
+            this._audioShort = audio.fallbackDesc
+                ? _('No Bluetooth headphones · audio on {name}', {name: audio.fallbackDesc})
+                : _('No Bluetooth headphones');
+        }
         if (infos.length >= 2) {
             return _('🎶 AUTOMATIC shared listening on {count} headphones ({names}){mic}',
                 {count: infos.length, names: infos.map(s => s.desc).join(', '), mic: micMsg});
@@ -418,6 +431,104 @@ export class PanelModel {
                     sensitive: true,
                 },
             ],
+        };
+    }
+
+    // Versione breve per il pannello dentro Smart Calendar Hub ("Page model"
+    // dell'hub: righe con titolo + una riga di dettaglio + UNA cosa a destra)
+    short() {
+        const hw = this._hw;
+        const on = this._enabled;
+        const allocated = this._quotaGamepads + this._quotaHeadphones;
+        const capReached = allocated >= this._usablePool;
+        const adapters = hw.controllers.map(h => {
+            const a = hw.adapters[h] ?? {activeLinks: 0, freeChannels: CH, busKind: 'Internal'};
+            return {
+                key: h,
+                title: _('{hci} · {bus}', {hci: h, bus: _(a.busKind ?? 'Internal')}),
+                subtitle: _('{used}/{total} channels used · {free} free', {used: a.activeLinks ?? 0, total: CH, free: a.freeChannels ?? CH}),
+            };
+        });
+        const multi = hw.controllers.length > 1;
+        const selected = multi && hw.controllers.includes(this._preferredScanHci) ? this._preferredScanHci : 'auto';
+
+        const device = dev => {
+            const busy = this._busy.has(dev.mac);
+            const battery = dev.battery ? ` · 🔋 ${dev.battery}` : '';
+            let status = dev.connected ? _('Connected on {hci}', {hci: dev.hci}) : _('Not connected');
+            // a destra: interruttore "connesso", oppure un valore se non si può
+            let trailing = {kind: 'toggle', active: dev.connected};
+            if (busy) {
+                trailing = {kind: 'value', text: '…'};
+            } else if (!dev.connected && dev.adapterFree <= 0) {
+                trailing = {kind: 'value', text: _('Full')};
+                status = _('Adapter {hci} full', {hci: dev.hci});
+            } else if (!dev.connected && (dev.category === 'gamepad' || dev.category === 'audio')) {
+                const isGp = dev.category === 'gamepad';
+                const hasSlot = on && hw.freeChannels > 0 &&
+                    (isGp ? this._connGamepads < this._quotaGamepads : this._connAudio < this._quotaHeadphones);
+                if (!hasSlot) {
+                    trailing = {kind: 'value', text: _('Locked')};
+                    status = isGp ? _('Give +1 to Gamepads to connect') : _('Give +1 to Headphones to connect');
+                }
+            } else if (!dev.connected && hw.freeChannels <= 0) {
+                trailing = {kind: 'value', text: _('Full')};
+            }
+            let mic = null;
+            if (dev.category === 'audio' && dev.connected) {
+                const micOn = this._micMacs.has(dev.mac) || dev.isMicActive;
+                mic = {
+                    active: micOn,
+                    title: _('Microphone of {device}', {device: dev.name}),
+                    subtitle: micOn ? _('On: voice (HFP)') : _('Off: HD audio (A2DP)'),
+                };
+            }
+            return {
+                dev,
+                icon: dev.iconName,
+                title: dev.name,
+                subtitle: status + battery,
+                trailing,
+                mic,
+                needsConfirm: dev.connected && dev.category === 'system',
+                confirmTitle: _('Disconnect {device}?', {device: dev.name}),
+                confirmSubtitle: _('You could lose your mouse or keyboard'),
+            };
+        };
+        const byCat = cat => this._devices.filter(d => d.category === cat).map(device);
+
+        return {
+            loaded: this._loaded,
+            enabled: on,
+            scanning: this._scanning,
+            enableSubtitle: on ? _('Channels and shared audio active') : _('Off'),
+            audioShort: on ? this._audioShort : _('Off'),
+            adapters,
+            adapterChoice: multi
+                ? [{key: 'auto', title: _('Auto ({hci})', {hci: hw.bestHci}), subtitle: _('The least busy adapter'), active: selected === 'auto'},
+                    ...adapters.map(a => ({...a, active: selected === a.key}))]
+                : null,
+            gamepads: {
+                value: String(this._quotaGamepads),
+                subtitle: _('Connected: {connected} of {quota} channels', {connected: this._connGamepads, quota: this._quotaGamepads}),
+                canMinus: on && this._quotaGamepads > this._connGamepads,
+                canPlus: on && !capReached,
+            },
+            headphones: {
+                value: String(this._quotaHeadphones),
+                subtitle: _('Connected: {connected} of {quota} channels', {connected: this._connAudio, quota: this._quotaHeadphones}),
+                canMinus: on && this._quotaHeadphones > this._connAudio,
+                canPlus: on && !capReached,
+            },
+            freeChannels: {
+                value: String(Math.max(0, this._usablePool - allocated)),
+                subtitle: _('{assigned}/{pool} assigned · {reserved} used by other devices',
+                    {assigned: allocated, pool: this._usablePool, reserved: this._reserved}),
+            },
+            deviceCount: this._devices.length,
+            gamepadList: byCat('gamepad'),
+            audioList: byCat('audio'),
+            otherList: byCat('system'),
         };
     }
 

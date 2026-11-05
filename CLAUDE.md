@@ -38,8 +38,9 @@ di `smart-calendar-hub@bria-bria.github.io` (API creata apposta dalla sessione "
 Hub refactor"; `externalPageFeatures` contiene `'side'` se c'è il riquadro affiancato).
 Colonna dell'hub: attivazione, Cerca BT, antenne, canali + / −; riquadro affiancato (come il
 calendario): liste dispositivi. Senza l'hub: la finestra Preferenze.
-Architettura: `bluehub-panel-model.js` = stato/regole/testi senza grafica; due facce:
-`prefs.js` (GTK) e `bluehub-hub-panel.js` (St). **Le modifiche alla logica vanno nel
+Architettura: `bluehub-panel-model.js` = stato/regole/testi senza grafica (`view()` testi lunghi,
+`short()` righe brevi); facce: `prefs.js` (GTK), `bluehub-hub-kit.js` (kit dell'hub, "Page model":
+README di Smart Calendar Hub) e `bluehub-hub-panel.js` (St, ripiego se l'hub non ha il kit). **Le modifiche alla logica vanno nel
 modello**, non nelle facce. Pulsante nel menu rapido = scorciatoia, sempre a una colonna,
 icona `icons/bluehub-symbolic.svg` ("hub a raggi"). Nessuna icona in barra o nel vassoio.
 

@@ -119,6 +119,14 @@ export class HubPanel {
         }
     }
 
+    refresh() {
+        this._model?.refresh();
+    }
+
+    scan() {
+        this._model?.scan();
+    }
+
     _destroy() {
         this._closing = true;
         this._model?.destroy();
@@ -127,7 +135,10 @@ export class HubPanel {
             GLib.source_remove(this._toastId);
             this._toastId = 0;
         }
-        // Il riquadro affiancato lo distrugge l'hub: qui solo si dimentica
+        // Il riquadro affiancato lo distrugge l'hub; se non l'ha mai preso è nostro
+        if (this.sidePage && !this.sidePage.get_parent()) {
+            this.sidePage.destroy();
+        }
         this.sidePage = null;
         this._sideBody = null;
         this._toastLabel = null;

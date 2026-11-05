@@ -27,9 +27,9 @@ EXT_SRC="$PROJ_DIR/bluehub-extension"
 EXT_ROOT="$HOME/.local/share/gnome-shell/extensions"
 OLD_UUID="bluehub@michele.local"          # vecchia versione, da togliere
 DESKTOP_DIR="$HOME/.local/share/applications"
-EXT_FILES=(metadata.json extension.js prefs.js stylesheet.css bluehub-core.js bluehub-i18n.js bluehub-panel-model.js bluehub-hub-panel.js)
+EXT_FILES=(metadata.json extension.js prefs.js stylesheet.css bluehub-core.js bluehub-i18n.js bluehub-panel-model.js bluehub-hub-panel.js bluehub-hub-kit.js)
 # File che il menu rapido carica solo al login (prefs.js invece si ricarica da solo)
-SHELL_FILES=(metadata.json extension.js stylesheet.css bluehub-core.js bluehub-i18n.js bluehub-panel-model.js bluehub-hub-panel.js)
+SHELL_FILES=(metadata.json extension.js stylesheet.css bluehub-core.js bluehub-i18n.js bluehub-panel-model.js bluehub-hub-panel.js bluehub-hub-kit.js)
 
 # --- Controllo che ci siano tutti i file PRIMA di toccare qualcosa ---
 for f in "${EXT_FILES[@]/#/$EXT_SRC/}"; do
