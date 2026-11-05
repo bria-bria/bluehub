@@ -160,7 +160,14 @@ class BlueHubQuickToggle extends QuickMenuToggle {
                     // aperto nell'hub, non lo chiede e resta quello che c'è)
                     buildPage: () => {
                         this._hubPanel = kit
-                            ? new KitHubPanel({kit, icon: this._icon, withSidePage: withSide, onClosed})
+                            ? new KitHubPanel({
+                                kit, icon: this._icon, withSidePage: withSide, onClosed,
+                                // messaggi di esito e contatore: solo se l'hub li offre
+                                notify: features.includes('message')
+                                    ? text => api.showPageMessage(this._extension.uuid, text) : null,
+                                setCount: withSide && features.includes('side-count')
+                                    ? n => api.setSideCount(this._extension.uuid, n) : null,
+                            })
                             : new HubPanel({
                                 withSidePage: withSide,
                                 onOpenWindow: () => this._extension.openPreferences(),

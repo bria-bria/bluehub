@@ -17,8 +17,14 @@ import St from 'gi://St';
 import {PanelModel} from './bluehub-panel-model.js';
 import {_} from './bluehub-i18n.js';
 
-// Pulsante del kit reso non attivo (niente clic né tastiera), con l'aspetto del tema
+// Pezzo del kit reso non attivo (niente clic né tastiera), con l'aspetto del tema.
+// Kit versione 2+: kit.setSensitive; prima: a mano.
+let kitSetSensitive = null;
 function setSensitive(btn, sensitive) {
+    if (kitSetSensitive) {
+        kitSetSensitive(btn, sensitive);
+        return btn;
+    }
     btn.reactive = sensitive;
     btn.can_focus = sensitive;
     if (sensitive) {
@@ -40,8 +46,13 @@ export class KitHubPanel {
     // kit: stateObj.pageKit dell'hub; icon: Gio.Icon di BlueHub
     // withSidePage: l'hub mostra il riquadro affiancato
     // onClosed(): fine visita (l'hub ha distrutto la colonna)
-    constructor({kit, icon, withSidePage, onClosed = null}) {
+    // notify(testo): messaggio di esito dell'hub; setCount(n): numero nell'intestazione del riquadro
+    constructor({kit, icon, withSidePage, onClosed = null, notify = null, setCount = null}) {
         this._kit = kit;
+        kitSetSensitive = typeof kit.setSensitive === 'function' ? kit.setSensitive : null;
+        this._notify = notify;
+        this._setCount = setCount;
+        this._lastCount = null;
         this._icon = icon;
         this._withSide = withSidePage;
         this._onClosed = onClosed;
@@ -59,7 +70,7 @@ export class KitHubPanel {
             }
         });
 
-        this._model = new PanelModel({onChange: () => this._render(), onToast: () => {}});
+        this._model = new PanelModel({onChange: () => this._render(), onToast: text => this._notify?.(text)});
         this.mainPage.connect('destroy', () => this._destroy());
         this._render();
         this._model.refresh();
@@ -89,6 +100,9 @@ export class KitHubPanel {
         this._closing = true;
         this._model?.destroy();
         this._model = null;
+        this._notify = null;
+        this._setCount = null;
+        kitSetSensitive = null;
         // Il riquadro lo distrugge l'hub; se non l'ha mai preso è nostro
         if (this.sidePage && !this.sidePage.get_parent()) {
             this.sidePage.destroy();
@@ -113,6 +127,11 @@ export class KitHubPanel {
         replaceChild(this.mainPage, this._kit.page(...this._columnPieces(s), ...(this._withSide ? [] : lists)));
         if (this._withSide && this.sidePage) {
             replaceChild(this.sidePage, this._kit.page(...lists));
+            // numero di dispositivi nell'intestazione del riquadro (solo quando cambia)
+            if (s.loaded && this._setCount && this._lastCount !== s.deviceCount) {
+                this._lastCount = s.deviceCount;
+                this._setCount(s.deviceCount);
+            }
         }
     }
 
