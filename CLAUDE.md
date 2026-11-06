@@ -13,6 +13,12 @@ il 04/11/2026 perché extensions.gnome.org richiede il campo `url`.
 I commit usano l'email anonima 301696067+bria-bria@users.noreply.github.com
 (configurata in questo repository): non usare l'email personale.
 
+**Squadra fissa (regola di Michele, 06/11/2026): in questo progetto si è sempre in tre.**
+Su GitHub i collaboratori sono `bria-bria` (proprietario) e `micheleperani76` (l'altro
+account di Michele, permesso di scrittura); ogni commit porta anche
+`Co-Authored-By: Claude …` come coautore. Non togliere nessuno dei due account e non
+fare commit senza la riga di Claude.
+
 ## Origine
 Copiato il 04/11/2026 da `Projects/Mio Portatile Linux/` (la copia là è vecchia,
 non più usata). Dal 04/11/2026 l'installazione si fa da qui con
