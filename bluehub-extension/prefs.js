@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // SPDX-FileCopyrightText: 2026 bria-bria
 
-// Finestra BlueHub (Preferenze dell'estensione), usata quando Smart Calendar Hub
-// non è installato. Stato, regole e testi stanno in bluehub-panel-model.js,
-// condiviso con il pannello dentro l'hub (bluehub-hub-kit.js): qui solo il disegno
-// con GTK/libadwaita.
+// BlueHub window (extension preferences), used when Smart Calendar Hub is not
+// installed. State, rules and texts live in bluehub-panel-model.js, shared with
+// the hub page (bluehub-hub-kit.js); this file only draws them with GTK/libadwaita.
 
 import Adw from 'gi://Adw';
 import Gtk from 'gi://Gtk';
@@ -15,15 +14,15 @@ import {PanelModel, SCAN_SECONDS} from './bluehub-panel-model.js';
 import {_, loadUserTranslations} from './bluehub-i18n.js';
 
 export default class BlueHubPreferences extends ExtensionPreferences {
-    // Sincrona: GNOME 45/46 non attendono una funzione async e mostrerebbero
-    // "nessuna interfaccia". Le traduzioni dell'utente arrivano subito dopo.
+    // Kept synchronous: GNOME 45/46 do not await an async version and would show
+    // "no preferences". User translations are applied right after.
     fillPreferencesWindow(window) {
         window.set_default_size(720, 820);
         window.set_search_enabled(false);
 
         const panel = new BlueHubWindowPanel(window);
         window.add(panel.page);
-        // Alla chiusura annulla comandi e attese in corso
+        // Cancel pending commands and waits on close
         window.connect('close-request', () => {
             panel.destroy();
             return false;
@@ -31,13 +30,13 @@ export default class BlueHubPreferences extends ExtensionPreferences {
     }
 }
 
-// La descrizione dei gruppi è markup: i nomi dei dispositivi possono contenere & < >
+// Group descriptions are markup, and device names may contain & < >
 const esc = text => GLib.markup_escape_text(text ?? '', -1);
 
 class BlueHubWindowPanel {
     constructor(window) {
         this._window = window;
-        this._rows = new Map();   // gruppo -> righe mostrate
+        this._rows = new Map();   // group -> rows shown
         this._model = new PanelModel({
             onChange: () => this._render(),
             onToast: text => this._window.add_toast(new Adw.Toast({title: text, timeout: 4, use_markup: false})),
@@ -47,8 +46,8 @@ class BlueHubWindowPanel {
         this._buildUi();
         this._render();
 
-        // Lingue diverse da italiano/inglese: carica (e completa con le frasi nuove)
-        // il file di traduzione dell'utente, poi ritraduce e aggiorna
+        // For languages other than Italian/English: load (and append new strings to)
+        // the user's translation file, then translate again and refresh
         loadUserTranslations({merge: true})
             .catch(logError)
             .finally(() => {
@@ -65,11 +64,11 @@ class BlueHubWindowPanel {
     }
 
     // ------------------------------------------------------------------
-    // Costruzione (una volta) e testi fissi
+    // One-time construction and static texts
     // ------------------------------------------------------------------
 
     _buildUi() {
-        // --- Attivazione + Cerca BT + antenne ---
+        // --- Enable + Search BT + adapters ---
         this._extGroup = new Adw.PreferencesGroup();
         this._refreshBtn = new Gtk.Button({icon_name: 'view-refresh-symbolic', valign: Gtk.Align.CENTER});
         this._refreshBtn.add_css_class('flat');
@@ -95,7 +94,7 @@ class BlueHubWindowPanel {
         this._antennaRow.add_suffix(this._antennaBox);
         this._extGroup.add(this._antennaRow);
 
-        // --- Canali e due riquadri [ − / + ] ---
+        // --- Channels and the two [ − / + ] cards ---
         this._radioGroup = new Adw.PreferencesGroup();
         this.page.add(this._radioGroup);
         this._radioRow = new Adw.ActionRow({use_markup: false});
@@ -109,7 +108,7 @@ class BlueHubWindowPanel {
         cards.append(this._auCard.box);
         this._radioGroup.add(cards);
 
-        // --- Liste dispositivi ---
+        // --- Device lists ---
         this._groups = {};
         for (const category of ['gamepad', 'audio', 'system']) {
             this._groups[category] = new Adw.PreferencesGroup();
@@ -119,13 +118,13 @@ class BlueHubWindowPanel {
         this._applyStaticTexts();
     }
 
-    // Testi fissi: alla costruzione e di nuovo dopo il caricamento delle traduzioni
+    // Called again once user translations are loaded
     _applyStaticTexts() {
-        this._extGroup.set_title(_('⚙️ BlueHub Extension'));
+        this._extGroup.set_title(_('BlueHub Extension'));
         this._refreshBtn.set_tooltip_text(_('Refresh adapters, channels and devices'));
         this._extRow.set_title(_('Enable BlueHub'));
         this._scanBtn.set_tooltip_text(_('Start a smart Bluetooth scan for {seconds} seconds', {seconds: SCAN_SECONDS}));
-        this._radioGroup.set_title(_('📡 Bluetooth Channel Allocation'));
+        this._radioGroup.set_title(_('Bluetooth Channel Allocation'));
     }
 
     _makeQuotaCard(onChange) {
@@ -160,13 +159,13 @@ class BlueHubWindowPanel {
     }
 
     // ------------------------------------------------------------------
-    // Disegno a ogni cambiamento del modello
+    // Redraw on every model change
     // ------------------------------------------------------------------
 
     _render() {
         const v = this._model.view();
 
-        // Attivazione (senza far scattare il gestore del pulsante)
+        // Block the handler so syncing the button does not toggle BlueHub
         if (this._masterBtn.get_active() !== v.enabled) {
             this._masterBtn.block_signal_handler(this._masterHandler);
             this._masterBtn.set_active(v.enabled);
@@ -178,7 +177,6 @@ class BlueHubWindowPanel {
         this._scanBtn.set_label(v.scanLabel);
         this._scanBtn.set_sensitive(v.enabled && !v.scanning);
 
-        // Antenne
         this._antennaRow.set_title(v.antenna.title);
         this._antennaRow.set_subtitle(v.antenna.subtitle);
         this._antennaRow.set_sensitive(v.enabled);
@@ -206,7 +204,6 @@ class BlueHubWindowPanel {
             }
         }
 
-        // Canali
         this._radioGroup.set_description(esc(v.channelsSummary));
         this._radioGroup.set_sensitive(v.enabled);
         this._radioRow.set_title(v.channelsTitle);
@@ -221,7 +218,6 @@ class BlueHubWindowPanel {
             card.plusBtn.set_sensitive(data.canPlus);
         }
 
-        // Liste dispositivi
         for (const group of v.groups) {
             this._renderGroup(group);
         }
@@ -256,7 +252,7 @@ class BlueHubWindowPanel {
         const r = new Adw.ActionRow({
             title: row.title,
             subtitle: row.subtitle,
-            use_markup: false,   // i nomi dei dispositivi possono contenere & < >
+            use_markup: false,   // device names may contain & < >
         });
         r.add_prefix(Gtk.Image.new_from_icon_name(row.iconName));
         const suffix = new Gtk.Box({spacing: 8, valign: Gtk.Align.CENTER});

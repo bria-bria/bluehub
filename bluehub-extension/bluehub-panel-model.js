@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // SPDX-FileCopyrightText: 2026 bria-bria
 
-// "Modello" del pannello BlueHub: stato, regole e testi, senza grafica.
-// Lo usano due "facce":
-// - prefs.js: la finestra BlueHub (GTK/libadwaita), quando Smart Calendar Hub non c'è
-// - bluehub-hub-kit.js: il pannello dentro Smart Calendar Hub (kit di pezzi dell'hub)
-// Ogni cambiamento chiama onChange(); la faccia ridisegna leggendo view().
+// BlueHub panel model: state, rules and texts, with no widgets.
+// Shared by two front ends so the logic lives in one place:
+// - prefs.js: the GTK/libadwaita window, used when Smart Calendar Hub is missing
+// - bluehub-hub-kit.js: the page inside Smart Calendar Hub
+// Every change calls onChange(); the front end redraws from view() or short().
 
 import Gio from 'gi://Gio';
 
@@ -16,26 +16,26 @@ export const SCAN_SECONDS = 8;
 const CH = Core.CHANNELS_PER_ADAPTER;
 
 export class PanelModel {
-    // onChange(): da ridisegnare; onToast(testo): breve messaggio per l'utente
+    // onChange(): redraw needed; onToast(text): short message for the user
     constructor({onChange, onToast}) {
         this._onChange = onChange;
         this._onToast = onToast;
         this._cancellable = new Gio.Cancellable();
         this._refreshing = false;
         this._refreshAgain = false;
-        this._lastBtSinks = null;      // cuffie BT viste all'ultimo aggiornamento
+        this._lastBtSinks = null;      // BT sinks seen at the last refresh
         this._sharedMsg = '';
-        this._audioShort = '';         // stato audio in una riga (pannello nell'hub)
+        this._audioShort = '';         // one-line audio status for the hub page
         this._scanning = false;
-        this._busy = new Set();        // MAC dei dispositivi in connessione/disconnessione
+        this._busy = new Set();        // MACs of devices being (dis)connected
 
-        // Valori iniziali: quelli veri arrivano dalla configurazione al primo aggiornamento
+        // Placeholders: the real values come from the config on the first refresh
         this._loaded = false;
         this._enabled = true;
         this._preferredScanHci = 'auto';
         this._micMacs = new Set();
 
-        // Quote assegnate con [+ / −] (partono da 0 o dai dispositivi già connessi)
+        // Quotas set with [+ / −]; never below the devices already connected
         this._quotaGamepads = 0;
         this._quotaHeadphones = 0;
         this._usablePool = 0;
@@ -70,7 +70,7 @@ export class PanelModel {
     }
 
     // ------------------------------------------------------------------
-    // Aggiornamento (audio + Bluetooth), senza bloccare
+    // Refresh (audio + Bluetooth), non-blocking
     // ------------------------------------------------------------------
 
     refresh() {
@@ -78,7 +78,7 @@ export class PanelModel {
     }
 
     async _doRefresh() {
-        // Se un aggiornamento è già in corso, ne chiede solo un altro alla fine
+        // Coalesce: if a refresh is running, just ask for one more at the end
         if (this._refreshing) {
             this._refreshAgain = true;
             return;
@@ -104,7 +104,7 @@ export class PanelModel {
         this._micMacs = new Set((cfg.mic_enabled_macs ?? []).map(m => m.toUpperCase()));
         this._loaded = true;
 
-        // Prima microfoni e audio condiviso, poi si rilegge lo stato aggiornato
+        // Sync audio first so the Bluetooth state read below reflects it
         const sharedMsg = await this._syncAudio();
         if (!this.alive) {
             return;
@@ -127,7 +127,7 @@ export class PanelModel {
         this._changed();
     }
 
-    // Microfoni BT + audio condiviso. Restituisce il testo di stato per le cuffie.
+    // BT microphones + shared audio. Returns the status text for the headphones group.
     async _syncAudio() {
         const c = this._cancellable;
         if (!this._enabled) {
@@ -135,17 +135,17 @@ export class PanelModel {
             await Core.unloadCombinedMics(c);
             this._lastBtSinks = null;
             this._audioShort = _('Off');
-            return _('⚪ BlueHub off — shared audio stopped');
+            return _('BlueHub off — shared audio stopped');
         }
 
         const mics = await Core.syncBtMicrophones(this._micMacs, c);
         let micMsg;
         if (mics.length >= 2) {
-            micMsg = _(' • 🎙️ {count} Bluetooth mics joined ({names})', {count: mics.length, names: mics.map(m => m.desc).join(', ')});
+            micMsg = _(' • {count} Bluetooth mics joined ({names})', {count: mics.length, names: mics.map(m => m.desc).join(', ')});
         } else if (mics.length === 1) {
-            micMsg = _(' • 🎙️ Bluetooth mic on: {name}', {name: mics[0].desc});
+            micMsg = _(' • Bluetooth mic on: {name}', {name: mics[0].desc});
         } else {
-            micMsg = _(' • 🔒 Headphones kept in HD stereo (Bluetooth mics off)');
+            micMsg = _(' • Headphones kept in HD stereo (Bluetooth mics off)');
         }
         const audio = await Core.applySharedAudioState(true, this._lastBtSinks, c);
         this._lastBtSinks = audio.btSinks;
@@ -163,19 +163,19 @@ export class PanelModel {
                 : _('No Bluetooth headphones');
         }
         if (infos.length >= 2) {
-            return _('🎶 AUTOMATIC shared listening on {count} headphones ({names}){mic}',
+            return _('Automatic shared listening on {count} headphones ({names}){mic}',
                 {count: infos.length, names: infos.map(s => s.desc).join(', '), mic: micMsg});
         }
         if (infos.length === 1) {
-            return _('🎧 Audio on: {name}{mic}', {name: infos[0].desc, mic: micMsg});
+            return _('Audio on: {name}{mic}', {name: infos[0].desc, mic: micMsg});
         }
         return audio.fallbackDesc
-            ? _('🔊 No Bluetooth headphones connected — audio on: {name}', {name: audio.fallbackDesc})
-            : _('🔊 No Bluetooth headphones connected — audio on the output chosen in the system');
+            ? _('No Bluetooth headphones connected — audio on: {name}', {name: audio.fallbackDesc})
+            : _('No Bluetooth headphones connected — audio on the output chosen in the system');
     }
 
     // ------------------------------------------------------------------
-    // Azioni dell'utente
+    // User actions
     // ------------------------------------------------------------------
 
     setEnabled(on) {
@@ -185,7 +185,7 @@ export class PanelModel {
         this._enabled = on;
         this._toast(on ? _('BlueHub on') : _('BlueHub off'));
         this._changed();
-        // Prima salva, poi applica l'audio e ridisegna (l'aggiornamento rilegge la configurazione)
+        // Save first: the refresh re-reads the config to apply the audio state
         Core.updateConfig({enabled: on}).then(() => this.refresh())
             .catch(e => Core.logBlueHubError(`Save: ${e}`));
     }
@@ -246,7 +246,7 @@ export class PanelModel {
             .then(() => this.refresh()).catch(e => Core.logBlueHubError(`Save: ${e}`));
     }
 
-    // Connette o disconnette (la conferma per mouse/tastiera la chiede la faccia)
+    // Connect or disconnect; the front end asks for confirmation on mouse/keyboard
     async deviceAction(dev) {
         if (this._busy.has(dev.mac)) {
             return;
@@ -265,7 +265,7 @@ export class PanelModel {
         if (!this.alive) {
             return;
         }
-        // Disconnettendo si libera anche il canale assegnato
+        // Disconnecting also gives back the assigned channel
         if (wasConnected) {
             if (dev.category === 'audio' && this._quotaHeadphones > 0) {
                 this._quotaHeadphones--;
@@ -286,7 +286,7 @@ export class PanelModel {
         const {adapters, bestHci} = this._hw;
         let target = this._preferredScanHci === 'auto' ? bestHci : this._preferredScanHci;
         if (!adapters[target]) {
-            target = bestHci;   // antenna scelta non più presente
+            target = bestHci;   // chosen adapter is gone
         }
         if (Object.keys(adapters).length > 1) {
             this._toast(_('Multi-adapter scan on {hci} ({free}/{total} free channels) for {seconds}s...',
@@ -308,7 +308,7 @@ export class PanelModel {
     }
 
     // ------------------------------------------------------------------
-    // Tutto ciò che le facce mostrano: testi già tradotti e stati
+    // Everything the front ends show: translated texts and states
     // ------------------------------------------------------------------
 
     view() {
@@ -318,7 +318,6 @@ export class PanelModel {
         const unassigned = Math.max(0, this._usablePool - allocated);
         const capReached = allocated >= this._usablePool;
 
-        // Antenne
         const {controllers, adapters, bestHci} = hw;
         let antenna;
         if (controllers.length === 1) {
@@ -355,10 +354,10 @@ export class PanelModel {
             loaded: this._loaded,
             enabled: on,
             scanning: this._scanning,
-            masterLabel: on ? _('🟢 On') : _('⚪ Off'),
+            masterLabel: on ? _('On') : _('Off'),
             masterSubtitle: on
-                ? _('🟢 BlueHub on — channel management and shared audio running')
-                : _("⚪ BlueHub off — press 'Off' to turn it back on"),
+                ? _('BlueHub on — channel management and shared audio running')
+                : _("BlueHub off — press 'Off' to turn it back on"),
             scanLabel: this._scanning ? _('Searching...') : _('Search BT'),
             antenna,
             channelsSummary: _('{total} total channels ({adapters}) − {reserved} already in use = {pool} free channels to assign',
@@ -367,24 +366,24 @@ export class PanelModel {
                 {total: hw.totalChannels, reserved: this._reserved, devices: sysDesc, pool: this._usablePool}),
             channelsSubtitle: _('No channel is reserved in advance: you can assign all available channels as you like.'),
             capTitle: capReached
-                ? _('🔒 All {pool} available channels are assigned ({gamepads} gamepads + {headphones} headphones)',
+                ? _('All {pool} available channels are assigned ({gamepads} gamepads + {headphones} headphones)',
                     {pool: this._usablePool, gamepads: this._quotaGamepads, headphones: this._quotaHeadphones})
                 : unassigned === 1
-                    ? _('🟢 You still have 1 channel to assign ({assigned}/{pool} assigned)', {assigned: allocated, pool: this._usablePool})
-                    : _('🟢 You still have {free} channels to assign ({assigned}/{pool} assigned)',
+                    ? _('You still have 1 channel to assign ({assigned}/{pool} assigned)', {assigned: allocated, pool: this._usablePool})
+                    : _('You still have {free} channels to assign ({assigned}/{pool} assigned)',
                         {free: unassigned, assigned: allocated, pool: this._usablePool}),
             capSubtitle: capReached
                 ? _('No channels left. To move a channel to the other box, first press [ − ] on the one that has it.')
                 : _('You can put them all on gamepads, all on headphones, or split them as you like.'),
             gamepadCard: {
-                title: _('🎮 Gamepads'),
+                title: _('Gamepads'),
                 value: this._quotaGamepads,
                 sub: _('Gamepads connected: {connected} / {quota}', {connected: this._connGamepads, quota: this._quotaGamepads}),
                 canMinus: on && this._quotaGamepads > this._connGamepads,
                 canPlus: on && !capReached,
             },
             audioCard: {
-                title: _('🎧 Headphones / Speakers'),
+                title: _('Headphones / Speakers'),
                 value: this._quotaHeadphones,
                 sub: _('Headphones connected: {connected} / {quota}', {connected: this._connAudio, quota: this._quotaHeadphones}),
                 canMinus: on && this._quotaHeadphones > this._connAudio,
@@ -393,7 +392,7 @@ export class PanelModel {
             groups: [
                 {
                     category: 'gamepad',
-                    title: _('🎮 Bluetooth gamepads (connected: {connected} / channels assigned: {quota})',
+                    title: _('Bluetooth gamepads (connected: {connected} / channels assigned: {quota})',
                         {connected: this._connGamepads, quota: this._quotaGamepads}),
                     description: this._quotaGamepads === 0 && this._connGamepads === 0
                         ? _('0 channels assigned to gamepads: press [ + ] in the Gamepads box to allow connections.')
@@ -406,7 +405,7 @@ export class PanelModel {
                 },
                 {
                     category: 'audio',
-                    title: _('🎧 Bluetooth headphones and speakers (connected: {connected} / channels assigned: {quota})',
+                    title: _('Bluetooth headphones and speakers (connected: {connected} / channels assigned: {quota})',
                         {connected: this._connAudio, quota: this._quotaHeadphones}),
                     description: this._sharedMsg,
                     empty: {title: _('No Bluetooth headphones or speakers known'),
@@ -416,7 +415,7 @@ export class PanelModel {
                 },
                 {
                     category: 'system',
-                    title: _('⌨️ Mouse, keyboard and other devices ({count} connected)', {count: sysConnected.length}),
+                    title: _('Mouse, keyboard and other devices ({count} connected)', {count: sysConnected.length}),
                     description: _("Protected from accidental disconnection: pressing 'Disconnect' asks for confirmation."),
                     empty: null,
                     rows: byCat('system').map(d => this._row(d)),
@@ -426,8 +425,8 @@ export class PanelModel {
         };
     }
 
-    // Versione breve per il pannello dentro Smart Calendar Hub ("Page model"
-    // dell'hub: righe con titolo + una riga di dettaglio + UNA cosa a destra)
+    // Short version for the Smart Calendar Hub page: its "Page model" rows have
+    // a title, one detail line and a single trailing widget
     short() {
         const hw = this._hw;
         const on = this._enabled;
@@ -446,9 +445,9 @@ export class PanelModel {
 
         const device = dev => {
             const busy = this._busy.has(dev.mac);
-            const battery = dev.battery ? ` · 🔋 ${dev.battery}` : '';
+            const battery = dev.battery ? ` · ${_('battery {pct}', {pct: dev.battery})}` : '';
             let status = dev.connected ? _('Connected on {hci}', {hci: dev.hci}) : _('Not connected');
-            // a destra: interruttore "connesso", oppure un valore se non si può
+            // Trailing widget: a connect switch, or a value saying why it cannot connect
             let trailing = {kind: 'toggle', active: dev.connected};
             if (busy) {
                 trailing = {kind: 'value', text: '…'};
@@ -524,21 +523,21 @@ export class PanelModel {
         };
     }
 
-    // Una riga dispositivo: testi, pulsante e (per le cuffie connesse) microfono
+    // One device row: texts, button and, for connected headphones, the mic switch
     _row(dev) {
-        const hciTag = `📡 ${dev.knownHcis.length > 1 ? dev.knownHcis.join('/') : dev.hci}`;
+        const hciTag = dev.knownHcis.length > 1 ? dev.knownHcis.join('/') : dev.hci;
         const status = dev.connected
-            ? _('🟢 Connected on {hci} (1 channel)', {hci: dev.hci})
-            : _('⚪ Not connected ({adapters})', {adapters: hciTag});
-        const battery = dev.battery ? ` • 🔋 ${dev.battery}` : '';
+            ? _('Connected on {hci} (1 channel)', {hci: dev.hci})
+            : _('Not connected ({adapters})', {adapters: hciTag});
+        const battery = dev.battery ? ` • ${_('battery {pct}', {pct: dev.battery})}` : '';
 
         let mic = null;
         if (dev.category === 'audio' && dev.connected) {
             const micOn = this._micMacs.has(dev.mac) || dev.isMicActive;
             mic = {
                 active: micOn,
-                label: micOn ? _('🎙️ Mic: ON (voice)') : _('🎙️ Mic: OFF (HD audio)'),
-                tooltip: _('OFF = headphones kept in high-quality stereo (A2DP)\nON = turns on the built-in microphone of these Bluetooth headphones (HFP)'),
+                label: micOn ? _('Mic: on (voice)') : _('Mic: off (HD audio)'),
+                tooltip: _('Off = headphones kept in high-quality stereo (A2DP)\nOn = turns on the built-in microphone of these Bluetooth headphones (HFP)'),
             };
         }
 
@@ -570,7 +569,6 @@ export class PanelModel {
             iconName: dev.iconName,
             mic,
             button,
-            // Mouse/tastiera connessi: chiedere conferma prima di scollegare
             needsConfirm: dev.connected && dev.category === 'system',
             confirmTitle: _('Disconnect {device}?', {device: dev.name}),
             confirmBody: _("You are about to disconnect '{device}' from adapter {hci}.\nIf it is your main mouse or keyboard you could lose control! Do you want to continue?",

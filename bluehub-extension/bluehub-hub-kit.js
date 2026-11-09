@@ -1,24 +1,24 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // SPDX-FileCopyrightText: 2026 bria-bria
 
-// Pannello BlueHub dentro Smart Calendar Hub, costruito con il kit di pezzi
-// standard dell'hub (stateObj.pageKit) secondo il suo "Page model":
-// - intestazioni disegnate dall'hub (title della colonna, sideTitle del riquadro)
-// - titoli di sezione piccoli, righe uguali in schede (icona, titolo, una riga
-//   di dettaglio, a destra UNA cosa: interruttore, valore o freccia)
-// - pulsanti a pillola, un solo pulsante principale per pagina
-// - nessun colore o fondo proprio, scorrimento dell'hub
-// Colonna: BlueHub, audio condiviso, antenne, canali [− / +], Cerca BT.
-// Riquadro affiancato: gamepad, cuffie (con microfono), altri dispositivi.
-// Stessa logica della finestra: bluehub-panel-model.js.
+// BlueHub page inside Smart Calendar Hub, built only from the hub's own widget
+// kit (stateObj.pageKit) so it follows the hub's "Page model":
+// - headers are drawn by the hub (column title, side pane sideTitle)
+// - small section titles, uniform rows in cards (icon, title, one detail line,
+//   a single trailing widget: switch, value or arrow)
+// - pill buttons, only one primary button per page
+// - no colors or backgrounds of our own; the hub handles scrolling
+// Column: BlueHub, shared audio, adapters, channels [− / +], Search BT.
+// Side pane: gamepads, headphones (with mic), other devices.
+// Same logic as the window: bluehub-panel-model.js.
 
 import St from 'gi://St';
 
 import {PanelModel} from './bluehub-panel-model.js';
 import {_} from './bluehub-i18n.js';
 
-// Pezzo del kit reso non attivo (niente clic né tastiera), con l'aspetto del tema.
-// Kit versione 2+: kit.setSensitive; prima: a mano.
+// Make a kit widget insensitive with the theme's look. Kit version 2+ provides
+// kit.setSensitive; older kits need it done by hand.
 let kitSetSensitive = null;
 function setSensitive(btn, sensitive) {
     if (kitSetSensitive) {
@@ -35,7 +35,7 @@ function setSensitive(btn, sensitive) {
     return btn;
 }
 
-// Mette la pagina nuova e distrugge subito quella vecchia (con i suoi segnali)
+// Destroy the old page right away so its signal handlers go with it
 function replaceChild(bin, child) {
     const old = bin.get_child();
     bin.set_child(child);
@@ -43,10 +43,10 @@ function replaceChild(bin, child) {
 }
 
 export class KitHubPanel {
-    // kit: stateObj.pageKit dell'hub; icon: Gio.Icon di BlueHub
-    // withSidePage: l'hub mostra il riquadro affiancato
-    // onClosed(): fine visita (l'hub ha distrutto la colonna)
-    // notify(testo): messaggio di esito dell'hub; setCount(n): numero nell'intestazione del riquadro
+    // kit: the hub's stateObj.pageKit; icon: BlueHub's Gio.Icon
+    // withSidePage: the hub shows the side pane
+    // onClosed(): the hub destroyed the column
+    // notify(text): hub result message; setCount(n): number in the side pane header
     constructor({kit, icon, withSidePage, onClosed = null, notify = null, setCount = null}) {
         this._kit = kit;
         kitSetSensitive = typeof kit.setSensitive === 'function' ? kit.setSensitive : null;
@@ -56,17 +56,17 @@ export class KitHubPanel {
         this._icon = icon;
         this._withSide = withSidePage;
         this._onClosed = onClosed;
-        this._confirmMac = null;      // mouse/tastiera in attesa di conferma
+        this._confirmMac = null;      // mouse/keyboard waiting for confirmation
         this._closing = false;
 
-        // Contenitori stabili (dati all'hub); dentro, la pagina del kit ricostruita
+        // Stable containers handed to the hub; the kit page inside is rebuilt
         this.mainPage = new St.Bin({x_expand: true});
         this.sidePage = this._withSide ? new St.Bin({x_expand: true}) : null;
         this.sidePage?.connect('destroy', () => {
             this.sidePage = null;
             this._withSide = false;
             if (this.mainPage && !this._closing) {
-                this._render();   // riquadro chiuso prima della colonna: liste nella colonna
+                this._render();   // side pane closed before the column: move the lists into the column
             }
         });
 
@@ -76,7 +76,7 @@ export class KitHubPanel {
         this._model.refresh();
     }
 
-    // Per i pulsanti tondi dell'intestazione del riquadro (disegnata dall'hub)
+    // Called by the round buttons in the side pane header (drawn by the hub)
     refresh() {
         this._model?.refresh();
     }
@@ -85,13 +85,13 @@ export class KitHubPanel {
         this._model?.scan();
     }
 
-    // Dopo l'apertura: se l'hub non ha messo a schermo il riquadro, liste nella colonna
+    // After opening: if the hub did not show the side pane, put the lists in the column
     checkSidePage() {
         if (this.sidePage && !this.sidePage.get_parent()) {
             const side = this.sidePage;
             this.sidePage = null;
             this._withSide = false;
-            side.destroy();   // mai preso dall'hub: è nostro
+            side.destroy();   // never adopted by the hub, so we own it
             this._render();
         }
     }
@@ -103,7 +103,7 @@ export class KitHubPanel {
         this._notify = null;
         this._setCount = null;
         kitSetSensitive = null;
-        // Il riquadro lo distrugge l'hub; se non l'ha mai preso è nostro
+        // The hub destroys the side pane, unless it never adopted it
         if (this.sidePage && !this.sidePage.get_parent()) {
             this.sidePage.destroy();
         }
@@ -115,7 +115,7 @@ export class KitHubPanel {
     }
 
     // ------------------------------------------------------------------
-    // Disegno: a ogni cambiamento del modello si ricostruiscono le pagine del kit
+    // Drawing: kit pages are rebuilt on every model change
     // ------------------------------------------------------------------
 
     _render() {
@@ -127,7 +127,7 @@ export class KitHubPanel {
         replaceChild(this.mainPage, this._kit.page(...this._columnPieces(s), ...(this._withSide ? [] : lists)));
         if (this._withSide && this.sidePage) {
             replaceChild(this.sidePage, this._kit.page(...lists));
-            // numero di dispositivi nell'intestazione del riquadro (solo quando cambia)
+            // Only push the device count to the hub when it changes
             if (s.loaded && this._setCount && this._lastCount !== s.deviceCount) {
                 this._lastCount = s.deviceCount;
                 this._setCount(s.deviceCount);
@@ -139,7 +139,6 @@ export class KitHubPanel {
         const k = this._kit;
         const pieces = [];
 
-        // BlueHub acceso/spento e stato dell'audio condiviso
         const enableRow = k.row({
             icon: this._icon,
             title: _('Enable BlueHub'),
@@ -152,7 +151,6 @@ export class KitHubPanel {
             k.row({icon: 'audio-speakers-symbolic', title: _('Shared audio'), subtitle: s.audioShort}),
         ));
 
-        // Antenne
         pieces.push(k.section(_('Adapters')));
         pieces.push(k.card(...s.adapters.map(a =>
             k.row({icon: 'network-wireless-hotspot-symbolic', title: a.title, subtitle: a.subtitle}))));
@@ -163,14 +161,13 @@ export class KitHubPanel {
                     icon: 'emblem-system-symbolic',
                     title: a.title,
                     subtitle: a.subtitle,
-                    trailing: a.active ? k.value('✓') : null,
+                    trailing: a.active ? k.value(_('Selected')) : null,
                     onActivate: () => this._model?.selectScanAdapter(a.key),
                 });
                 return setSensitive(r, s.enabled);
             })));
         }
 
-        // Canali: una riga con il valore, sotto i pulsanti − / +
         pieces.push(k.section(_('Channels')));
         for (const [kind, icon, title, data] of [
             ['gamepad', 'input-gaming-symbolic', _('Gamepads'), s.gamepads],
@@ -189,7 +186,7 @@ export class KitHubPanel {
             trailing: k.value(s.freeChannels.value),
         })));
 
-        // Cerca BT (l'unico pulsante principale della pagina) e Aggiorna
+        // Search BT is the page's only primary button
         pieces.push(k.buttons(
             setSensitive(k.button({
                 label: s.scanning ? _('Searching...') : _('Search BT'),
@@ -231,7 +228,7 @@ export class KitHubPanel {
                 }
             }
             pieces.push(k.card(...rows));
-            // Conferma per scollegare mouse/tastiera: riga di avviso + due pulsanti
+            // Inline confirmation before disconnecting a mouse/keyboard
             if (confirm) {
                 pieces.push(k.card(k.row({icon: 'dialog-warning-symbolic', title: confirm.confirmTitle, subtitle: confirm.confirmSubtitle})));
                 pieces.push(k.buttons(
@@ -249,7 +246,6 @@ export class KitHubPanel {
         return pieces;
     }
 
-    // Dispositivo: a destra l'interruttore "connesso" (o un valore se non si può)
     _deviceRow(d) {
         const k = this._kit;
         if (d.trailing.kind === 'value') {
@@ -259,7 +255,7 @@ export class KitHubPanel {
             active: d.trailing.active,
             onToggle: on => {
                 if (!on && d.needsConfirm) {
-                    sw.state = true;   // resta connesso finché non si conferma
+                    sw.state = true;   // stay connected until confirmed
                     this._confirmMac = d.dev.mac;
                     this._render();
                     return;

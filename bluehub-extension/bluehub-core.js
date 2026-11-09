@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // SPDX-FileCopyrightText: 2026 bria-bria
 
-// Logica comune di BlueHub, usata sia da extension.js (pulsante nel menu rapido)
-// sia da prefs.js (pannello di controllo). Usa solo GLib/Gio: niente GTK né
-// GNOME Shell, così può essere importato in entrambi i processi.
-// Tutte le operazioni lente (pactl, bluetoothctl, D-Bus) sono asincrone.
+// BlueHub shared logic, used by extension.js (Quick Settings button) and by
+// prefs.js (panel). Only GLib/Gio, no GTK or GNOME Shell imports, so it can be
+// loaded in both processes. All slow operations (pactl, bluetoothctl, D-Bus)
+// are asynchronous.
 
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
@@ -21,7 +21,7 @@ Gio._promisify(Gio.FileEnumerator.prototype, 'close_async');
 const COMBINED_SINK_NAME = 'bluehub_combined_sink';
 const COMBINED_MIC_SINK = 'bluehub_combined_mic_mix';
 const COMBINED_MIC_SOURCE = 'bluehub_combined_mic';
-// Nomi usati dalle versioni precedenti: vengono comunque riconosciuti e rimossi
+// Names used by older versions: still recognised so they can be removed
 const OLD_COMBINED_NAMES = ['multy_bt_sink', 'audio_condiviso_scelto'];
 
 export const CHANNELS_PER_ADAPTER = 7;
@@ -29,18 +29,16 @@ export const CHANNELS_PER_ADAPTER = 7;
 const CONFIG_FILE = GLib.build_filenamev([GLib.get_home_dir(), '.config', 'bluehub.json']);
 const DEFAULT_CONFIG = {enabled: true, preferred_scan_hci: 'auto', mic_enabled_macs: []};
 
-// Unico punto in cui BlueHub scrive errori nel log di sistema
 export function logBlueHubError(message) {
     console.error(`[BlueHub] ${message}`);
 }
 
 // ------------------------------------------------------------------
-// Configurazione (~/.config/bluehub.json)
+// Configuration (~/.config/bluehub.json)
 // ------------------------------------------------------------------
 
-// Lettura e scrittura sono asincrone: GNOME Shell non resta mai fermo ad aspettare il disco.
-// Legge il file. File mancante = valori predefiniti; file illeggibile o JSON non
-// valido = errore (così chi salva non lo sovrascrive cancellando le impostazioni).
+// Missing file = defaults; unreadable file or invalid JSON = throw, so that
+// updateConfig() never overwrites the user's settings with defaults.
 async function readConfigStrict() {
     let contents;
     try {
@@ -66,7 +64,7 @@ export async function loadConfig() {
 async function saveConfig(cfg) {
     const file = Gio.File.new_for_path(CONFIG_FILE);
     const data = new TextEncoder().encode(JSON.stringify(cfg, null, 2));
-    // replace_contents scrive su un file temporaneo e poi lo sostituisce (atomico)
+    // replace_contents writes a temporary file and renames it (atomic)
     const write = () => file.replace_contents_async(data, null, false, Gio.FileCreateFlags.REPLACE_DESTINATION, null);
     try {
         await write();
@@ -75,7 +73,7 @@ async function saveConfig(cfg) {
             logBlueHubError(`Cannot save config: ${e}`);
             return;
         }
-        // Manca la cartella ~/.config: la crea e riprova
+        // ~/.config is missing: create it and retry
         try {
             await file.get_parent().make_directory_async(GLib.PRIORITY_DEFAULT, null);
             await write();
@@ -85,12 +83,12 @@ async function saveConfig(cfg) {
     }
 }
 
-// Accoda le scritture: due modifiche ravvicinate non si sovrascrivono a vicenda
+// Serialise writes so two quick changes do not overwrite each other
 let configWriteQueue = Promise.resolve();
 
-// Rilegge il file, cambia solo le chiavi indicate e salva: non cancella le
-// modifiche fatte nel frattempo dall'altro processo (pannello o estensione).
-// Se il file esiste ma non è valido NON lo sovrascrive (non perde le impostazioni).
+// Re-read the file and change only the given keys, so changes made meanwhile by
+// the other process (panel or extension) are kept. An invalid file is never
+// overwritten, so the user's settings are not lost.
 export function updateConfig(changes) {
     const job = configWriteQueue.then(async () => {
         let cfg;
@@ -104,19 +102,18 @@ export function updateConfig(changes) {
         await saveConfig(cfg);
         return cfg;
     });
-    // La coda non trattiene la configurazione: resta solo una promessa vuota
+    // Keep only an empty promise in the queue, not the config object
     configWriteQueue = job.then(() => undefined, () => undefined);
     return job;
 }
 
 // ------------------------------------------------------------------
-// Comandi esterni e D-Bus
+// External commands and D-Bus
 // ------------------------------------------------------------------
 
-// Esegue un comando senza bloccare: restituisce lo stdout (o '' se fallisce).
-// Dopo timeoutMs il comando viene terminato.
+// Returns stdout, or '' on failure. The command is killed after timeoutMs.
 async function runCommand(argv, {cancellable = null, input = null, timeoutMs = 8000} = {}) {
-    // Già annullato (estensione disattivata, pannello chiuso): non avvia nulla
+    // Already cancelled (extension disabled, panel closed): start nothing
     if (cancellable?.is_cancelled()) {
         return '';
     }
@@ -142,7 +139,7 @@ async function runCommand(argv, {cancellable = null, input = null, timeoutMs = 8
         return (stdout ?? '').trim();
     } catch (e) {
         if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED)) {
-            proc.force_exit();   // annullato: non lascia il comando in esecuzione
+            proc.force_exit();   // do not leave the command running
         } else {
             logBlueHubError(`Command failed ${argv.join(' ')}: ${e}`);
         }
@@ -161,7 +158,7 @@ function bluezCall(path, iface, method, params = null, {replyType = null, timeou
         Gio.DBusCallFlags.NONE, timeoutMs, cancellable);
 }
 
-// Attende `ms` millisecondi; termina prima se cancellable viene annullato.
+// Resolves after `ms` milliseconds, or earlier if cancellable is cancelled.
 function sleep(ms, cancellable = null) {
     return new Promise(resolve => {
         let cancelId = 0;
@@ -182,11 +179,11 @@ function sleep(ms, cancellable = null) {
 }
 
 // ------------------------------------------------------------------
-// Antenne Bluetooth (hci0, hci1...) e canali
+// Bluetooth adapters (hci0, hci1...) and channels
 // ------------------------------------------------------------------
 
-// Voci di /sys/class/bluetooth (hci0, hci0:1...) con la destinazione del
-// collegamento, che contiene "usb" per le chiavette USB. Asincrona.
+// /sys/class/bluetooth entries (hci0, hci0:1...) with their symlink target,
+// which contains "usb" for USB dongles.
 async function listSysBluetooth() {
     const entries = new Map();
     try {
@@ -204,7 +201,7 @@ async function listSysBluetooth() {
     return entries;
 }
 
-// Conteggio veloce dei canali (per il menu rapido): legge solo /sys.
+// Fast channel count for Quick Settings: reads /sys only, no D-Bus.
 export async function getHardwareChannelStats() {
     let hosts = 0;
     let links = 0;
@@ -273,7 +270,7 @@ function computeHardwareStats(managed, sysEntries) {
             mac: meta.mac ?? '',
             alias: meta.alias ?? hci,
             powered: meta.powered ?? true,
-            // /sys/class/bluetooth/hciN punta al dispositivo reale: "usb" = chiavetta USB
+            // /sys/class/bluetooth/hciN links to the real device: "usb" means a USB dongle
             busKind: idx > 0 && (sysEntries.get(hci) ?? '').toLowerCase().includes('usb') ? 'USB' : 'Internal',
             activeLinks: used,
             freeChannels: Math.max(0, CHANNELS_PER_ADAPTER - used),
@@ -282,7 +279,7 @@ function computeHardwareStats(managed, sysEntries) {
         activeLinks += used;
     });
 
-    // Antenna migliore per cercare: quella con più canali liberi (a parità, non hci0)
+    // Best adapter for scanning: most free channels; on a tie, prefer a dongle over hci0
     let bestHci = hosts[0];
     for (const h of hosts) {
         const a = adapters[h];
@@ -305,7 +302,7 @@ function computeHardwareStats(managed, sysEntries) {
 }
 
 // ------------------------------------------------------------------
-// Dispositivi Bluetooth
+// Bluetooth devices
 // ------------------------------------------------------------------
 
 function isUnnamedMac(name) {
@@ -341,7 +338,7 @@ function classifyDevice(name, iconType) {
     return {iconName: 'bluetooth-active-symbolic', kindLabel: 'Bluetooth device', category: 'system'};
 }
 
-// Per ogni MAC: profili PipeWire (A2DP = stereo HD, HFP = microfono attivo)
+// Per MAC: PipeWire card profiles (A2DP = HD stereo, HFP = microphone on)
 async function getBtCardsProfileMap(cancellable) {
     const out = await runCommand(['pactl', '-f', 'json', 'list', 'cards'], {cancellable});
     const result = {};
@@ -357,7 +354,7 @@ async function getBtCardsProfileMap(cancellable) {
 
             const a2dp = profNames.filter(p => p.startsWith('a2dp-sink'))
                 .sort((x, y) => (x !== 'a2dp-sink') - (y !== 'a2dp-sink') || x.length - y.length);
-            // Preferisce mSBC (voce wideband) se presente
+            // Prefer mSBC (wideband voice) when available
             const hfpRank = p => p.includes('msbc') ? 0 : p === 'headset-head-unit' ? 1 : 2;
             const hfp = profNames.filter(p => p.startsWith('headset-head-unit'))
                 .sort((x, y) => hfpRank(x) - hfpRank(y));
@@ -411,8 +408,8 @@ function buildDeviceList(managed, hw, cardMap) {
             isMicActive: card.isMicActive ?? false,
         };
 
-        // Lo stesso dispositivo può essere noto a più antenne: tiene quella connessa
-        // (o, se nessuna lo è, quella con più canali liberi)
+        // A device may be known to several adapters: keep the connected one
+        // (or, if none is, the one with the most free channels)
         const prev = byMac[mac];
         if (prev) {
             if (!prev.knownHcis.includes(hci)) {
@@ -430,7 +427,7 @@ function buildDeviceList(managed, hw, cardMap) {
         (b.connected - a.connected) || a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
 }
 
-// Stato completo per il pannello: antenne, canali e dispositivi
+// Full state for the panel: adapters, channels and devices
 export async function readBluetoothState(cancellable = null) {
     const [managed, cardMap, sysEntries] = await Promise.all([
         getManagedObjects(cancellable),
@@ -441,7 +438,7 @@ export async function readBluetoothState(cancellable = null) {
     return {hw, devices: buildDeviceList(managed, hw, cardMap)};
 }
 
-// Connette o disconnette un dispositivo (D-Bus; se fallisce, bluetoothctl)
+// D-Bus first; falls back to bluetoothctl if BlueZ does not answer
 export async function setDeviceConnected(dev, connect, cancellable = null) {
     try {
         await bluezCall(dev.dbusPath, 'org.bluez.Device1', connect ? 'Connect' : 'Disconnect', null,
@@ -458,9 +455,9 @@ export async function setDeviceConnected(dev, connect, cancellable = null) {
     }
 }
 
-// Accende l'antenna, la rende accoppiabile e cerca dispositivi per `seconds` secondi.
-// La ricerca di BlueZ resta attiva solo finché è vivo chi l'ha avviata: per questo
-// la si avvia via D-Bus da questo processo (non con "bluetoothctl scan on" + quit).
+// Power the adapter on, make it pairable and scan for `seconds` seconds.
+// BlueZ stops discovery when the client that started it goes away, so it is
+// started over D-Bus from this process (not with "bluetoothctl scan on" + quit).
 export async function scanWithAdapter(hci, seconds = 8, cancellable = null) {
     const path = `/org/bluez/${hci}`;
     try {
@@ -472,9 +469,9 @@ export async function scanWithAdapter(hci, seconds = 8, cancellable = null) {
         await bluezCall(path, 'org.bluez.Adapter1', 'StartDiscovery', null, {cancellable});
     } catch (_e) {
         if (cancellable?.is_cancelled()) {
-            return false;   // pannello chiuso: nessuna ricerca di riserva
+            return false;   // panel closed: no fallback scan
         }
-        // BlueZ non risponde via D-Bus: riserva con bluetoothctl (antenna predefinita)
+        // BlueZ did not answer over D-Bus: fall back to bluetoothctl (default adapter)
         await runCommand(['bluetoothctl', '--timeout', String(seconds), 'scan', 'on'],
             {timeoutMs: (seconds + 4) * 1000, cancellable});
         return false;
@@ -494,8 +491,8 @@ function nodeDesc(node) {
     return node.properties?.['device.description'] || node.description || node.name;
 }
 
-// Elenco uscite/ingressi audio, oppure null se pactl non ha risposto (errore o
-// annullamento): null NON significa "nessuna uscita", così non si cambia l'audio a caso.
+// Audio sinks/sources, or null if pactl did not answer (error or cancelled).
+// null does NOT mean "no outputs", so callers never switch audio by mistake.
 async function listNodes(kind, cancellable) {
     const out = await runCommand(['pactl', '-f', 'json', 'list', kind], {cancellable});
     if (!out) {
@@ -508,9 +505,9 @@ async function listNodes(kind, cancellable) {
     }
 }
 
-// Uscita audio da usare quando non c'è audio Bluetooth. Si sceglie con
-// "fallback_sink" in ~/.config/bluehub.json; se non è impostata (o non esiste
-// su questo PC) BlueHub non tocca nulla. Restituisce la descrizione o null.
+// Output used when no Bluetooth audio is present, set with "fallback_sink" in
+// ~/.config/bluehub.json. If unset (or not present on this PC) nothing is
+// touched. Returns its description or null.
 async function applyFallbackSink(sinks, cancellable) {
     const fallback = (await loadConfig()).fallback_sink;
     const sink = fallback ? sinks.find(s => s.name === fallback) : null;
@@ -521,11 +518,11 @@ async function applyFallbackSink(sinks, cancellable) {
     return nodeDesc(sink);
 }
 
-// Audio condiviso: con 2+ cuffie BT crea un'uscita unica che suona su tutte.
-// prevBtSinks = cuffie viste all'aggiornamento precedente (null = non note):
-// l'uscita predefinita si cambia SOLO quando le cuffie cambiano, così non si
-// sovrascrive l'uscita scelta a mano dall'utente.
-// Restituisce {count, btSinks, btSinkInfos, fallbackDesc}.
+// Shared audio: with 2+ BT headphones, create one output that plays on all.
+// prevBtSinks = headphones seen at the previous refresh (null = unknown). The
+// default output is changed ONLY when the headphones change, so an output the
+// user picked by hand is not overridden.
+// Returns {count, btSinks, btSinkInfos, fallbackDesc}.
 export async function applySharedAudioState(enabled, prevBtSinks, cancellable = null) {
     const [modulesOut, sinks] = await Promise.all([
         runCommand(['pactl', 'list', 'short', 'modules'], {cancellable}),
@@ -535,7 +532,7 @@ export async function applySharedAudioState(enabled, prevBtSinks, cancellable = 
         return {count: 0, btSinks: prevBtSinks, btSinkInfos: [], fallbackDesc: null};
     }
 
-    // Ordinate per nome: la stessa coppia di cuffie dà sempre la stessa riga "slaves="
+    // Sorted by name so the same headphones always give the same "slaves=" argument
     const btSinkInfos = sinks
         .filter(s => (s.name ?? '').startsWith('bluez_output.'))
         .map(s => ({name: s.name, desc: nodeDesc(s)}))
@@ -545,8 +542,8 @@ export async function applySharedAudioState(enabled, prevBtSinks, cancellable = 
     const wantCombined = enabled && btSinks.length >= 2;
     const wantedSlaves = `slaves=${btSinks.join(',')}`;
 
-    // Combine-sink di BlueHub già presenti: se uno ha già esattamente queste
-    // cuffie lo tiene (la musica non si interrompe), gli altri li rimuove.
+    // Keep an existing BlueHub combine-sink with exactly these headphones (so
+    // playback is not interrupted) and remove the others.
     let keepExisting = false;
     let removed = 0;
     for (const line of modulesOut.split('\n')) {
@@ -569,7 +566,7 @@ export async function applySharedAudioState(enabled, prevBtSinks, cancellable = 
 
     let fallbackDesc = null;
     if (!enabled) {
-        // Riporta l'audio sull'uscita di riserva solo se BlueHub stava usando l'audio condiviso
+        // Restore the fallback output only if BlueHub was running shared audio
         if (removed > 0) {
             fallbackDesc = await applyFallbackSink(sinks, cancellable);
         }
@@ -587,21 +584,20 @@ export async function applySharedAudioState(enabled, prevBtSinks, cancellable = 
             await runCommand(['pactl', 'set-default-sink', COMBINED_SINK_NAME], {cancellable});
         }
     } else if (btSinks.length === 1) {
-        // Passa alla cuffia solo se è appena arrivata o se finiva l'audio condiviso
+        // Switch to the headphones only if they just appeared or shared audio just ended
         if (removed > 0 || (prevBtSinks !== null && !prevBtSinks.includes(btSinks[0]))) {
             await runCommand(['pactl', 'set-default-sink', btSinks[0]], {cancellable});
         }
     } else if (removed > 0 || prevBtSinks?.length > 0) {
-        // Nessuna cuffia: torna all'uscita di riserva solo se le cuffie si sono appena scollegate
+        // No headphones: restore the fallback only if they were just disconnected
         fallbackDesc = await applyFallbackSink(sinks, cancellable);
     }
     return {count: btSinks.length, btSinks, btSinkInfos, fallbackDesc};
 }
 
-// Rimuove il mix dei microfoni BT creato da BlueHub
 export async function unloadCombinedMics(cancellable = null) {
     const out = await runCommand(['pactl', 'list', 'short', 'modules'], {cancellable});
-    // Prima i loopback/remap, poi il null-sink: si scorre al contrario
+    // Walk backwards so loopbacks/remap go before the null-sink they use
     for (const line of out.split('\n').reverse()) {
         if (line.includes(COMBINED_MIC_SINK) || line.includes(COMBINED_MIC_SOURCE)) {
             const id = line.trim().split(/\s+/)[0];
@@ -613,12 +609,12 @@ export async function unloadCombinedMics(cancellable = null) {
 }
 
 // ------------------------------------------------------------------
-// Lettori multimediali (MPRIS): cambiando profilo (microfono acceso/spento)
-// molte cuffie mandano da sole "pausa", come per una telefonata. BlueHub
-// annota i lettori che suonavano e, se dopo il cambio sono in pausa, li riavvia.
+// Media players (MPRIS): on a profile switch (mic on/off) many headphones send
+// "pause" by themselves, as for a phone call. BlueHub notes which players were
+// playing and resumes them if they end up paused after the switch.
 // ------------------------------------------------------------------
 
-// Lavori in sottofondo ancora in corso (riavvio dei lettori): annullati in disable()
+// Background jobs still running (player resume), cancelled in disable()
 const backgroundWork = new Set();
 
 export function cancelBackgroundWork() {
@@ -629,7 +625,7 @@ export function cancelBackgroundWork() {
 }
 
 const MPRIS_PREFIX = 'org.mpris.MediaPlayer2.';
-// playerctld rimanda i comandi al lettore attivo: si userebbe due volte lo stesso
+// playerctld proxies the active player: listing it would resume that player twice
 const MPRIS_SKIP = new Set(['org.mpris.MediaPlayer2.playerctld']);
 
 async function playbackStatus(name, cancellable) {
@@ -663,8 +659,8 @@ async function playingPlayers(cancellable) {
     return playing;
 }
 
-// Riavvia i lettori che suonavano e che le cuffie hanno messo in pausa
-// (controllo dopo 1,5 e dopo 3 secondi: la pausa può arrivare in ritardo)
+// Resume players that were playing and got paused by the headphones.
+// Checked after 1.5 and 3 seconds because the pause can arrive late.
 async function resumePausedPlayers(players, cancellable) {
     const resumed = new Set();
     for (const wait of [1500, 1500]) {
@@ -686,10 +682,10 @@ async function resumePausedPlayers(players, cancellable) {
     return resumed.size;
 }
 
-// Microfoni delle cuffie BT: di default le cuffie restano in A2DP (stereo HD);
-// quelle indicate in micMacs passano in HFP (microfono attivo). Con 2+ microfoni
-// BT attivi li unisce in un unico microfono. Restituisce i microfoni BT attivi
-// [{name, desc}] (il testo di stato lo compone il pannello, tradotto).
+// BT headphone microphones: headphones stay in A2DP (HD stereo) by default;
+// those in micMacs switch to HFP (mic on). With 2+ BT mics active they are
+// joined into one microphone. Returns the active BT mics [{name, desc}]; the
+// panel builds the translated status text.
 export async function syncBtMicrophones(micMacs, cancellable = null) {
     await unloadCombinedMics(cancellable);
 
@@ -704,14 +700,14 @@ export async function syncBtMicrophones(micMacs, cancellable = null) {
         }
     }
     if (changes.length > 0) {
-        // Prima del cambio di profilo: chi sta suonando (per riavviarlo se le cuffie lo mettono in pausa)
+        // Before switching: note what is playing, to resume it if the headphones pause it
         const playing = await playingPlayers(cancellable);
         for (const [cardName, profile] of changes) {
             await runCommand(['pactl', 'set-card-profile', cardName, profile], {cancellable});
         }
         if (playing.length > 0) {
-            // in sottofondo, anche se nel frattempo il pannello viene chiuso;
-            // si ferma con cancelBackgroundWork() (disable dell'estensione)
+            // Runs in the background even if the panel closes meanwhile;
+            // stopped by cancelBackgroundWork() in disable()
             const resumeCancellable = new Gio.Cancellable();
             backgroundWork.add(resumeCancellable);
             resumePausedPlayers(playing, resumeCancellable)
@@ -720,9 +716,9 @@ export async function syncBtMicrophones(micMacs, cancellable = null) {
         }
     }
 
-    // Microfoni attivi = cuffie in modalità voce (HFP) dopo i cambi di profilo.
-    // Alcune cuffie (codec "duplex", es. Nothing Ear) espongono un ingresso anche
-    // in modalità audio HD: quello NON conta come microfono acceso.
+    // Active mics = headphones in voice mode (HFP) after the profile switches.
+    // Some headphones ("duplex" codecs, e.g. Nothing Ear) expose an input in HD
+    // audio mode too: that does NOT count as a mic that is on.
     const voiceMacs = new Set(Object.entries(changes.length > 0 ? await getBtCardsProfileMap(cancellable) : cardMap)
         .filter(([, card]) => card.isMicActive)
         .map(([mac]) => mac));

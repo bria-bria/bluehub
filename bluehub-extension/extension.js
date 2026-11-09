@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // SPDX-FileCopyrightText: 2026 bria-bria
 
-// Pulsante BlueHub nel menu rapido di GNOME: attiva/disattiva BlueHub, mostra i
-// canali Bluetooth in uso e apre il pannello: dentro Smart Calendar Hub se c'è,
-// altrimenti la finestra Preferenze (prefs.js).
-// La logica (audio condiviso, configurazione) sta in bluehub-core.js.
+// BlueHub button in GNOME Quick Settings: turns BlueHub on/off, shows the
+// Bluetooth channels in use and opens the panel, inside Smart Calendar Hub when
+// available, otherwise the preferences window (prefs.js).
+// The logic (shared audio, configuration) lives in bluehub-core.js.
 
 import GObject from 'gi://GObject';
 import Gio from 'gi://Gio';
@@ -20,13 +20,12 @@ import {_, loadUserTranslations, unloadUserTranslations} from './bluehub-i18n.js
 
 const SMART_CALENDAR_HUB_UUID = 'smart-calendar-hub@bria-bria.github.io';
 
-// Icona "hub a raggi" di BlueHub (icons/bluehub-symbolic.svg)
 function blueHubIcon(extension) {
     return new Gio.FileIcon({file: extension.dir.get_child('icons').get_child('bluehub-symbolic.svg')});
 }
 
-// Smart Calendar Hub, se è installato e attivo e offre la "via preferenziale"
-// per mostrare la pagina di un'altra estensione senza icona; altrimenti null
+// Smart Calendar Hub's API if it is installed, enabled and can show another
+// extension's page; otherwise null
 function smartCalendarHub() {
     const hub = Main.extensionManager.lookup(SMART_CALENDAR_HUB_UUID);
     const api = hub?.stateObj;
@@ -36,8 +35,8 @@ function smartCalendarHub() {
 const BlueHubQuickToggle = GObject.registerClass(
 class BlueHubQuickToggle extends QuickMenuToggle {
     _init(extension) {
-        // Lo stato vero (attivo/disattivato) arriva dalla configurazione, letta
-        // in modo asincrono dal primo aggiornamento qui sotto
+        // The real on/off state comes from the config, read asynchronously by
+        // the first refresh below
         const icon = blueHubIcon(extension);
         super._init({
             title: 'BlueHub',
@@ -107,9 +106,8 @@ class BlueHubQuickToggle extends QuickMenuToggle {
         super.destroy();
     }
 
-    // "Apri pannello": con Smart Calendar Hub apre il suo pannello laterale con
-    // BlueHub completo (colonna dell'hub + riquadro affiancato per le liste);
-    // senza l'hub (o se non riesce) apre la finestra BlueHub
+    // With Smart Calendar Hub, open the full BlueHub page there (hub column plus
+    // side pane for the lists); without it, or if that fails, open the window
     _openPanel() {
         const api = smartCalendarHub();
         let shown = false;
@@ -118,15 +116,15 @@ class BlueHubQuickToggle extends QuickMenuToggle {
             const withSide = features.includes('side');
             const kit = features.includes('kit') ? api.pageKit : null;
             if (!kit) {
-                // hub senza il kit delle pagine (versione vecchia): finestra BlueHub
+                // Older hub without the page kit
                 this._extension.openPreferences();
                 return;
             }
             const onClosed = () => {
                 this._hubPanel = null;
-                this._refreshState();   // lo stato può essere cambiato nell'hub
+                this._refreshState();   // the state may have changed in the hub
             };
-            // Intestazione del riquadro disegnata dall'hub: titolo e due pulsanti tondi
+            // Side pane header drawn by the hub: title and two round buttons
             const header = withSide && features.includes('side-header') ? {
                 sideTitle: _('Bluetooth devices'),
                 sideActions: [
@@ -138,12 +136,12 @@ class BlueHubQuickToggle extends QuickMenuToggle {
                 shown = api.showExternalPage({
                     id: this._extension.uuid,
                     title: 'BlueHub',
-                    // Il pannello si crea solo quando l'hub lo chiede (se BlueHub è già
-                    // aperto nell'hub, non lo chiede e resta quello che c'è)
+                    // Only called when the hub needs a new page; if BlueHub is
+                    // already open there, the existing page is kept
                     buildPage: () => {
                         this._hubPanel = new KitHubPanel({
                             kit, icon: this._icon, withSidePage: withSide, onClosed,
-                            // messaggi di esito e contatore: solo se l'hub li offre
+                            // Result messages and counter only if the hub supports them
                             notify: features.includes('message')
                                 ? text => api.showPageMessage(this._extension.uuid, text) : null,
                             setCount: withSide && features.includes('side-count')
@@ -167,13 +165,12 @@ class BlueHubQuickToggle extends QuickMenuToggle {
         }
     }
 
-    // Avvia un aggiornamento senza bloccare GNOME
     _refreshState() {
-        this._doRefresh().catch(e => Core.logBlueHubError(`Errore aggiornamento: ${e}`));
+        this._doRefresh().catch(e => Core.logBlueHubError(`Refresh: ${e}`));
     }
 
     async _doRefresh() {
-        // Se un aggiornamento è già in corso, ne chiede solo un altro alla fine
+        // Coalesce: if a refresh is running, just ask for one more at the end
         if (this._refreshing) {
             this._refreshAgain = true;
             return;
@@ -232,7 +229,7 @@ class BlueHubSystemIndicator extends SystemIndicator {
     _init(extension) {
         super._init();
 
-        // Nessuna icona nella barra in alto: solo il pulsante nel menu rapido
+        // No top bar icon: only the Quick Settings button
         this._toggle = new BlueHubQuickToggle(extension);
         this.quickSettingsItems.push(this._toggle);
     }
@@ -244,17 +241,16 @@ export default class BlueHubExtension extends Extension {
         this._gridSignals = [];
 
         const qs = Main.panel.statusArea.quickSettings;
-        // Pulsante sempre piccolo (una colonna)
         qs.addExternalIndicator(this._indicator);
 
-        // Tiene BlueHub in fondo ai pulsanti quando GNOME ne aggiunge altri
+        // Keep BlueHub last when GNOME adds more buttons
         const grid = qs.menu?._grid;
         if (grid) {
             this._gridSignals.push(
                 grid.connect('child-added', () => this._keepLast()),
                 grid.connect('child-removed', (_g, child) => {
-                    // Quando GNOME si chiude smonta il menu rapido e distrugge il
-                    // pulsante: da quel momento non va più usato ("already disposed")
+                    // On shutdown GNOME tears down Quick Settings and destroys the
+                    // button; touching it afterwards fails with "already disposed"
                     if (this._indicator && child === this._indicator._toggle) {
                         this._indicator._toggle = null;
                     }
@@ -264,7 +260,7 @@ export default class BlueHubExtension extends Extension {
         this._keepLast();
     }
 
-    // BlueHub ultimo tra i pulsanti (subito prima di "applicazioni in background")
+    // Place BlueHub last, just before the "background apps" item
     _keepLast() {
         const qs = Main.panel.statusArea.quickSettings;
         const grid = qs?.menu?._grid;

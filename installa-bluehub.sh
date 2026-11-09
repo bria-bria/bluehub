@@ -2,57 +2,57 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # SPDX-FileCopyrightText: 2026 bria-bria
 # ============================================================
-#  installa-bluehub.sh  (installazione di sviluppo)
-#  1. Chiude l'eventuale vecchio pannello Python (versioni precedenti)
-#  2. Aggiorna l'estensione GNOME Shell "BlueHub" (UUID letto da metadata.json)
-#     e rimuove la vecchia versione con UUID bluehub@michele.local
-#  3. Aggiorna la scorciatoia nel menu Applicazioni
-#  4. Apre il pannello BlueHub (finestra Preferenze dell'estensione)
+#  installa-bluehub.sh  (development install)
+#  1. Closes the old Python panel, if running (older versions)
+#  2. Updates the "BlueHub" GNOME Shell extension (UUID read from metadata.json)
+#     and removes the old version with UUID bluehub@michele.local
+#  3. Updates the Applications menu launcher
+#  4. Opens the BlueHub panel (extension preferences window)
 #
-#  Nota: su Wayland (GNOME 45+) il codice nuovo del pulsante nel menu rapido
-#  (extension.js, bluehub-core.js) viene caricato solo dopo logout/login.
-#  Il pannello (prefs.js) invece si aggiorna subito. Lo script lo segnala.
+#  Note: on Wayland (GNOME 45+) new Quick Settings code (extension.js,
+#  bluehub-core.js) is only loaded after logout/login, while the panel
+#  (prefs.js) updates right away. The script says when a re-login is needed.
 # ============================================================
 set -euo pipefail
 
-# --- Non va lanciato con sudo: lavora tutto nella tua home ---
+# --- Must not run with sudo: everything happens in your home directory ---
 if [[ $EUID -eq 0 ]]; then
-    echo "ERRORE: non lanciare questo script con sudo. Lancialo come utente normale." >&2
+    echo "ERROR: do not run this script with sudo. Run it as a normal user." >&2
     exit 1
 fi
 
-# --- Percorsi (ricavati, non scritti a mano) ---
+# --- Paths (derived, not hard-coded) ---
 PROJ_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 EXT_SRC="$PROJ_DIR/bluehub-extension"
 EXT_ROOT="$HOME/.local/share/gnome-shell/extensions"
-OLD_UUID="bluehub@michele.local"          # vecchia versione, da togliere
+OLD_UUID="bluehub@michele.local"          # old version, to be removed
 DESKTOP_DIR="$HOME/.local/share/applications"
 EXT_FILES=(metadata.json extension.js prefs.js bluehub-core.js bluehub-i18n.js bluehub-panel-model.js bluehub-hub-kit.js)
-# File che il menu rapido carica solo al login (prefs.js invece si ricarica da solo)
+# Files GNOME Shell only reloads at login (prefs.js reloads by itself)
 SHELL_FILES=(metadata.json extension.js bluehub-core.js bluehub-i18n.js bluehub-panel-model.js bluehub-hub-kit.js)
 
-# --- Controllo che ci siano tutti i file PRIMA di toccare qualcosa ---
+# --- Check that every file exists BEFORE touching anything ---
 for f in "${EXT_FILES[@]/#/$EXT_SRC/}"; do
     if [[ ! -f "$f" ]]; then
-        echo "ERRORE: file mancante: $f" >&2
+        echo "ERROR: missing file: $f" >&2
         exit 1
     fi
 done
 
-# UUID: unica fonte è metadata.json
+# metadata.json is the only source of the UUID
 EXT_UUID="$(sed -n 's/.*"uuid"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$EXT_SRC/metadata.json")"
 if [[ -z "$EXT_UUID" ]]; then
-    echo "ERRORE: UUID non trovato in metadata.json" >&2
+    echo "ERROR: UUID not found in metadata.json" >&2
     exit 1
 fi
 EXT_DEST="$EXT_ROOT/$EXT_UUID"
 
-# --- 1. Chiude il vecchio pannello Python, se ancora aperto (versioni precedenti) ---
-# Solo comandi che INIZIANO con python3 e hanno come argomento .../bluehub.py
+# --- 1. Close the old Python panel, if still open (older versions) ---
+# Match only commands that START with python3 and take .../bluehub.py as argument
 PATTERN="^(/usr/bin/)?python3? [^ ]*bluehub\.py( |$)"
 pkill -f "$PATTERN" 2>/dev/null || true
 
-# --- 2. Aggiorna l'estensione (unica fonte: cartella bluehub-extension/) ---
+# --- 2. Update the extension (single source: bluehub-extension/) ---
 mkdir -p "$EXT_DEST"
 EXT_CHANGED=0
 for f in "${EXT_FILES[@]}"; do
@@ -63,7 +63,7 @@ for f in "${EXT_FILES[@]}"; do
         cp -f "$EXT_SRC/$f" "$EXT_DEST/$f"
     fi
 done
-# Icone (cartella icons/): fanno parte del pulsante nel menu rapido
+# Icons are used by the Quick Settings button, so they need a re-login too
 mkdir -p "$EXT_DEST/icons"
 for icon in "$EXT_SRC"/icons/*.svg; do
     [[ -f "$icon" ]] || continue
@@ -72,19 +72,19 @@ for icon in "$EXT_SRC"/icons/*.svg; do
         cp -f "$icon" "$EXT_DEST/icons/"
     fi
 done
-# Il vecchio pannello Python non fa più parte dell'estensione
+# The old Python panel is no longer part of the extension
 rm -f -- "$EXT_DEST/bluehub.py"
 
-# Toglie la vecchia versione (altrimenti al login comparirebbero due pulsanti BlueHub)
+# Remove the old version, otherwise two BlueHub buttons would appear after login
 if [[ "$OLD_UUID" != "$EXT_UUID" && -d "$EXT_ROOT/$OLD_UUID" ]]; then
     gnome-extensions disable "$OLD_UUID" 2>/dev/null || true
     rm -rf -- "${EXT_ROOT:?}/$OLD_UUID"
-    echo "Rimossa la vecchia estensione $OLD_UUID."
+    echo "Removed the old extension $OLD_UUID."
     EXT_CHANGED=1
 fi
 
-# Attiva la nuova. Se GNOME non la conosce ancora (estensione appena installata,
-# su Wayland serve il login), la aggiunge alla lista così parte al prossimo login.
+# Enable the new one. If GNOME does not know it yet (freshly installed; Wayland
+# needs a login), add it to the list so it starts at the next login.
 EXT_KNOWN=1
 if ! gnome-extensions enable "$EXT_UUID" 2>/dev/null; then
     EXT_KNOWN=0
@@ -96,16 +96,16 @@ if ! gnome-extensions enable "$EXT_UUID" 2>/dev/null; then
             gsettings set org.gnome.shell enabled-extensions "${CURRENT%]}, '$EXT_UUID']"
         fi
     fi
-    echo "La nuova estensione $EXT_UUID verrà attivata al prossimo login."
+    echo "The new extension $EXT_UUID will be enabled at the next login."
     EXT_CHANGED=1
 fi
 
-# --- 3. Scorciatoia nel menu Applicazioni: apre il pannello (Preferenze) ---
+# --- 3. Applications menu launcher: opens the panel (preferences) ---
 mkdir -p "$DESKTOP_DIR"
 cat > "$DESKTOP_DIR/bluehub.desktop" <<EOF
 [Desktop Entry]
 Name=BlueHub
-Comment=Connessioni Bluetooth Multiple (Gamepad e Audio Condiviso)
+Comment=Multiple Bluetooth connections (gamepads and shared audio)
 Exec=gnome-extensions prefs $EXT_UUID
 Icon=bluetooth-active
 Terminal=false
@@ -113,16 +113,16 @@ Type=Application
 Categories=AudioVideo;Audio;Settings;Game;
 EOF
 
-# --- 4. Apre il pannello ---
+# --- 4. Open the panel ---
 if [[ $EXT_KNOWN -eq 1 ]]; then
-    gnome-extensions prefs "$EXT_UUID" || echo "ATTENZIONE: impossibile aprire il pannello BlueHub." >&2
+    gnome-extensions prefs "$EXT_UUID" || echo "WARNING: could not open the BlueHub panel." >&2
 fi
 
 echo "============================================================"
-echo " BlueHub aggiornato."
+echo " BlueHub updated."
 if [[ $EXT_CHANGED -eq 1 ]]; then
     echo ""
-    echo " ⚠  Il pulsante nel menu rapido è cambiato: per vederlo aggiornato"
-    echo "    fai LOGOUT e poi LOGIN (su Wayland è obbligatorio)."
+    echo " The Quick Settings button has changed: to load the new version,"
+    echo " log out and log back in (required on Wayland)."
 fi
 echo "============================================================"
