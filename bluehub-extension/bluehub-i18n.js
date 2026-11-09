@@ -33,15 +33,9 @@ const README_TEXT =
 const IT = {
     // --- Menu rapido (extension.js) ---
     'Loading...': 'Lettura...',
-    'Bluetooth channels & shared audio': 'Gestione Canali Bluetooth & Audio Condiviso',
-    '📡 Reading channels...': '📡 Lettura canali...',
-    '🚀 Open BlueHub channel panel (+ / −)': '🚀 Apri Pannello Canali BlueHub (+ / −)',
     'Off': 'Disattivato',
-    '⚪ BlueHub off': '⚪ Estensione disattivata',
     'Shared ({count} headphones)': 'Condiviso ({count} cuffie)',
-    '🟢 {used}/{total} channels used • 🎶 {count} headphones joined': '🟢 {used}/{total} canali usati • 🎶 {count} cuffie unite',
     '{free}/{total} channels free': '{free}/{total} canali liberi',
-    '🟢 {used}/{total} channels in use ({free} free)': '🟢 {used}/{total} canali in uso ({free} liberi)',
 
     // --- Tipi di dispositivo e antenne (bluehub-core.js) ---
     'Gamepad / Controller': 'Gamepad / Controller',

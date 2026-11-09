@@ -11,7 +11,6 @@ import Gio from 'gi://Gio';
 
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
-import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import {QuickMenuToggle, SystemIndicator} from 'resource:///org/gnome/shell/ui/quickSettings.js';
 
 
@@ -44,67 +43,50 @@ class BlueHubQuickToggle extends QuickMenuToggle {
             title: 'BlueHub',
             subtitle: _('Loading...'),
             gicon: icon,
-            // il clic apre il pannello; il colore (checked) mostra se BlueHub è attivo
-            toggleMode: false,
+            // Click: turn BlueHub on/off, like Wi-Fi and Bluetooth. Arrow: open BlueHub.
+            toggleMode: true,
             checked: false,
         });
 
-        // Per annullare i comandi in corso quando l'estensione viene disattivata
+        // Cancels running commands when the extension is disabled
         this._cancellable = new Gio.Cancellable();
         this._refreshing = false;
         this._refreshAgain = false;
-        this._lastBtSinks = null;   // cuffie BT viste all'ultimo aggiornamento
-        this._configLoaded = false; // diventa true dopo la prima lettura della configurazione
-        // Annulla anche se il pulsante viene distrutto senza passare da destroy() JS
+        this._lastBtSinks = null;   // Bluetooth headphones seen at the previous refresh
+        this._wasEnabled = null;    // state at the previous refresh (null = not read yet)
+        this._configLoaded = false;
+        this._extension = extension;
+        this._icon = icon;
+        // Also cancel when the button is destroyed without our destroy() (from C)
         this.connect('destroy', () => this._cancellable.cancel());
 
-
-        this._statusItem = new PopupMenu.PopupMenuItem(_('📡 Reading channels...'), {reactive: false});
-        this.menu.addMenuItem(this._statusItem);
-
-        // Attiva/disattiva dalla freccetta del pulsante
-        this._enableItem = new PopupMenu.PopupSwitchMenuItem(_('Enable BlueHub'), false);
-        this._enableItem.connect('toggled', (_item, on) => {
-            // Configurazione non ancora letta: niente salvataggio, si rilegge lo stato vero
+        // Click (the toggle has already switched): save the new state and apply it
+        this.connect('clicked', () => {
             if (!this._configLoaded) {
+                // real state not known yet: read it instead of saving a guess
                 this._refreshState();
                 return;
             }
-            Core.updateConfig({enabled: on})
+            Core.updateConfig({enabled: this.checked})
                 .then(() => this._refreshState())
-                .catch(e => Core.logBlueHubError(`Errore salvataggio: ${e}`));
-        });
-        this.menu.addMenuItem(this._enableItem);
-
-        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-
-        this._openItem = new PopupMenu.PopupMenuItem('');
-        this._extension = extension;
-        this._icon = icon;   // creata una volta, riusata nell'intestazione
-        this._openItem.connect('activate', () => {
-            Main.panel.statusArea.quickSettings.menu.close();
-            this._openPanel();
-        });
-        this.menu.addMenuItem(this._openItem);
-        this._applyStaticTexts();
-
-        // Clic sul pulsante: apre subito il pannello BlueHub (nell'hub o la finestra)
-        this.connect('clicked', () => {
-            Main.panel.statusArea.quickSettings.menu.close();
-            this._openPanel();
+                .catch(e => Core.logBlueHubError(`Save: ${e}`));
         });
 
+        // The arrow opens BlueHub itself (hub panel or window) instead of a submenu
+        this.menu.setHeader(icon, 'BlueHub');
         this._menuOpenId = this.menu.connect('open-state-changed', (_menu, isOpen) => {
-            if (isOpen) {
-                this._refreshState();
+            if (!isOpen) {
+                return;
             }
+            this.menu.close();
+            Main.panel.statusArea.quickSettings.menu.close();
+            this._openPanel();
         });
 
-        // Lingue diverse da italiano/inglese: carica il file dell'utente, poi ritraduce
+        // Languages other than Italian/English: load the user's file, then translate again
         loadUserTranslations()
             .then(() => {
                 if (!this._cancellable.is_cancelled()) {
-                    this._applyStaticTexts();
                     this._refreshState();
                 }
             })
@@ -112,27 +94,14 @@ class BlueHubQuickToggle extends QuickMenuToggle {
         this._refreshState();
     }
 
-    // Testi che non cambiano con lo stato (intestazione e voce del pannello)
-    _applyStaticTexts() {
-        this.menu.setHeader(this._icon, 'BlueHub', _('Bluetooth channels & shared audio'));
-        this._openItem.label.text = _('🚀 Open BlueHub channel panel (+ / −)');
-    }
-
-    // Chiamato da disable(): ferma i comandi in corso, scollega i segnali e
-    // libera le righe del menu prima di distruggere il pulsante
+    // Called by disable(): stops running commands, disconnects the menu signal
+    // and closes the BlueHub page in the hub before destroying the button
     destroy() {
         this._cancellable.cancel();
         if (this._menuOpenId) {
             this.menu.disconnect(this._menuOpenId);
             this._menuOpenId = 0;
         }
-        this._statusItem?.destroy();
-        this._statusItem = null;
-        this._openItem?.destroy();
-        this._openItem = null;
-        this._enableItem?.destroy();
-        this._enableItem = null;
-        // Il pannello nell'hub va chiuso insieme al pulsante
         this._hubPanel?.mainPage?.destroy();
         this._hubPanel = null;
         super.destroy();
@@ -222,33 +191,35 @@ class BlueHubQuickToggle extends QuickMenuToggle {
                 if (this.checked !== isEnabled) {
                     this.checked = isEnabled;
                 }
-                this._enableItem?.setToggleState(isEnabled);
                 this._configLoaded = true;
 
-                const hw = await Core.getHardwareChannelStats();
-                const audio = await Core.applySharedAudioState(isEnabled, this._lastBtSinks, this._cancellable);
+                if (!isEnabled) {
+                    // Off: no checks at all. Only once, right after switching off,
+                    // undo what BlueHub was doing (shared audio, joined microphones).
+                    if (this._wasEnabled !== false) {
+                        const audio = await Core.applySharedAudioState(false, this._lastBtSinks, this._cancellable);
+                        await Core.unloadCombinedMics(this._cancellable);
+                        if (this._cancellable.is_cancelled()) {
+                            return;
+                        }
+                        this._lastBtSinks = audio.btSinks;
+                    }
+                    this._wasEnabled = false;
+                    this.subtitle = _('Off');
+                    continue;
+                }
+                this._wasEnabled = true;
 
-                // Estensione disattivata mentre i comandi giravano: non toccare più il pulsante
+                const hw = await Core.getHardwareChannelStats();
+                const audio = await Core.applySharedAudioState(true, this._lastBtSinks, this._cancellable);
+                // Extension disabled while the commands were running: leave the button alone
                 if (this._cancellable.is_cancelled()) {
                     return;
                 }
                 this._lastBtSinks = audio.btSinks;
-                const btAudioCount = audio.count;
-
-                let statusText;
-                if (!isEnabled) {
-                    this.subtitle = _('Off');
-                    statusText = _('⚪ BlueHub off');
-                } else if (btAudioCount >= 2) {
-                    this.subtitle = _('Shared ({count} headphones)', {count: btAudioCount});
-                    statusText = _('🟢 {used}/{total} channels used • 🎶 {count} headphones joined',
-                        {used: hw.activeLinks, total: hw.totalChannels, count: btAudioCount});
-                } else {
-                    this.subtitle = _('{free}/{total} channels free', {free: hw.freeChannels, total: hw.totalChannels});
-                    statusText = _('🟢 {used}/{total} channels in use ({free} free)',
-                        {used: hw.activeLinks, total: hw.totalChannels, free: hw.freeChannels});
-                }
-                this._statusItem.label.text = statusText;
+                this.subtitle = audio.count >= 2
+                    ? _('Shared ({count} headphones)', {count: audio.count})
+                    : _('{free}/{total} channels free', {free: hw.freeChannels, total: hw.totalChannels});
             } while (this._refreshAgain);
         } finally {
             this._refreshing = false;
