@@ -8,9 +8,11 @@
 
 import GObject from 'gi://GObject';
 import Gio from 'gi://Gio';
+import GLib from 'gi://GLib';
 
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import {PopupAnimation} from 'resource:///org/gnome/shell/ui/boxpointer.js';
 import {QuickMenuToggle, SystemIndicator} from 'resource:///org/gnome/shell/ui/quickSettings.js';
 
 
@@ -74,12 +76,17 @@ class BlueHubQuickToggle extends QuickMenuToggle {
         // The arrow opens BlueHub itself (hub panel or window) instead of a submenu
         this.menu.setHeader(icon, 'BlueHub');
         this._menuOpenId = this.menu.connect('open-state-changed', (_menu, isOpen) => {
-            if (!isOpen) {
+            if (!isOpen || this._redirectId) {
                 return;
             }
-            this.menu.close();
-            Main.panel.statusArea.quickSettings.menu.close();
-            this._openPanel();
+            // Closing while the submenu is still opening is ignored: wait for idle
+            this._redirectId = GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+                this._redirectId = 0;
+                this.menu.close(PopupAnimation.NONE);
+                Main.panel.statusArea.quickSettings.menu.close(PopupAnimation.NONE);
+                this._openPanel();
+                return GLib.SOURCE_REMOVE;
+            });
         });
 
         // Languages other than Italian/English: load the user's file, then translate again
@@ -100,6 +107,10 @@ class BlueHubQuickToggle extends QuickMenuToggle {
         if (this._menuOpenId) {
             this.menu.disconnect(this._menuOpenId);
             this._menuOpenId = 0;
+        }
+        if (this._redirectId) {
+            GLib.Source.remove(this._redirectId);
+            this._redirectId = 0;
         }
         this._hubPanel?.mainPage?.destroy();
         this._hubPanel = null;
