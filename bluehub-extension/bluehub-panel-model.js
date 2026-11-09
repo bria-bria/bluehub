@@ -38,6 +38,7 @@ export class PanelModel {
         // Quotas set with [+ / −]; never below the devices already connected
         this._quotaGamepads = 0;
         this._quotaHeadphones = 0;
+        this._quotasSet = false;      // initial quotas chosen at the first reading
         this._usablePool = 0;
         this._reserved = 0;
         this._connGamepads = 0;
@@ -123,6 +124,14 @@ export class PanelModel {
         const connSystem = connected('system');
         this._reserved = Math.max(connSystem, hw.activeLinks - this._connGamepads - this._connAudio);
         this._usablePool = Math.max(0, hw.totalChannels - this._reserved);
+        // First reading: one channel already reserved for each kind of known device
+        // (a gamepad, headphones), so they can connect without pressing [ + ]
+        if (!this._quotasSet) {
+            this._quotasSet = true;
+            const known = cat => devices.some(d => d.category === cat);
+            this._quotaGamepads = Math.max(this._connGamepads, known('gamepad') ? 1 : 0);
+            this._quotaHeadphones = Math.max(this._connAudio, known('audio') ? 1 : 0);
+        }
         this._clampQuotas();
         this._changed();
     }
@@ -456,8 +465,9 @@ export class PanelModel {
                 status = _('Adapter {hci} full', {hci: dev.hci});
             } else if (!dev.connected && (dev.category === 'gamepad' || dev.category === 'audio')) {
                 const isGp = dev.category === 'gamepad';
-                const hasSlot = on && hw.freeChannels > 0 &&
-                    (isGp ? this._connGamepads < this._quotaGamepads : this._connAudio < this._quotaHeadphones);
+                // BlueHub off: plain Bluetooth, no quotas
+                const hasSlot = hw.freeChannels > 0 && (!on ||
+                    (isGp ? this._connGamepads < this._quotaGamepads : this._connAudio < this._quotaHeadphones));
                 if (!hasSlot) {
                     trailing = {kind: 'value', text: _('Locked')};
                     status = isGp ? _('Give +1 to Gamepads to connect') : _('Give +1 to Headphones to connect');
@@ -550,8 +560,9 @@ export class PanelModel {
             button = {label: _('Adapter {hci} full ({total}/{total})', {hci: dev.hci, total: CH}), sensitive: false, style: null};
         } else if (dev.category === 'gamepad' || dev.category === 'audio') {
             const isGp = dev.category === 'gamepad';
-            const hasSlot = this._enabled && this._hw.freeChannels > 0 &&
-                (isGp ? this._connGamepads < this._quotaGamepads : this._connAudio < this._quotaHeadphones);
+            // BlueHub off: plain Bluetooth, no quotas
+            const hasSlot = this._hw.freeChannels > 0 && (!this._enabled ||
+                (isGp ? this._connGamepads < this._quotaGamepads : this._connAudio < this._quotaHeadphones));
             button = {
                 label: hasSlot ? _('Connect') : isGp ? _('Locked (give +1 to Gamepads)') : _('Locked (give +1 to Headphones)'),
                 sensitive: hasSlot,
