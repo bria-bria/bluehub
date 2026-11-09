@@ -8,7 +8,6 @@
 
 import GObject from 'gi://GObject';
 import Gio from 'gi://Gio';
-import GLib from 'gi://GLib';
 
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
@@ -73,21 +72,12 @@ class BlueHubQuickToggle extends QuickMenuToggle {
                 .catch(e => Core.logBlueHubError(`Save: ${e}`));
         });
 
-        // The arrow opens BlueHub itself (hub panel or window) instead of a submenu
-        this.menu.setHeader(icon, 'BlueHub');
-        this._menuOpenId = this.menu.connect('open-state-changed', (_menu, isOpen) => {
-            if (!isOpen || this._redirectId) {
-                return;
-            }
-            // Closing while the submenu is still opening is ignored: wait for idle
-            this._redirectId = GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
-                this._redirectId = 0;
-                this.menu.close(PopupAnimation.NONE);
-                Main.panel.statusArea.quickSettings.menu.close(PopupAnimation.NONE);
-                this._openPanel();
-                return GLib.SOURCE_REMOVE;
-            });
-        });
+        // The arrow opens BlueHub itself (hub panel or window): our submenu never
+        // opens, so its empty card is never shown, not even for an instant
+        this.menu.open = () => {
+            Main.panel.statusArea.quickSettings.menu.close(PopupAnimation.NONE);
+            this._openPanel();
+        };
 
         // Languages other than Italian/English: load the user's file, then translate again
         loadUserTranslations()
@@ -100,18 +90,10 @@ class BlueHubQuickToggle extends QuickMenuToggle {
         this._refreshState();
     }
 
-    // Called by disable(): stops running commands, disconnects the menu signal
+    // Called by disable(): stops running commands
     // and closes the BlueHub page in the hub before destroying the button
     destroy() {
         this._cancellable.cancel();
-        if (this._menuOpenId) {
-            this.menu.disconnect(this._menuOpenId);
-            this._menuOpenId = 0;
-        }
-        if (this._redirectId) {
-            GLib.Source.remove(this._redirectId);
-            this._redirectId = 0;
-        }
         this._hubPanel?.mainPage?.destroy();
         this._hubPanel = null;
         super.destroy();
